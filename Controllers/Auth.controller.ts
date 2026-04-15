@@ -22,7 +22,7 @@ export async function registerUser(req : Request, res : Response) : Promise<Resp
     try{
         const hashedPassword = await bcrypt.hash(password, 10);
         const result = await pool.query(
-            'INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id, name, email',
+            'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email',
             [name, email, hashedPassword]
         );
         const user = result.rows[0];
@@ -31,7 +31,7 @@ export async function registerUser(req : Request, res : Response) : Promise<Resp
         const accessToken = generateAccessToken(user.id, user.name, user.email);
         
         // Store refresh token in database for revocation and session tracking
-        await pool.query('UPDATE users SET refreshToken = $1 WHERE id = $2', [refreshToken, user.id]);
+        await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [refreshToken, user.id]);
         
         res.cookie('refreshToken', refreshToken, {
             ...COOKIE_OPTIONS,
@@ -69,7 +69,7 @@ export async function loginUser(req : Request, res : Response) : Promise<Respons
             return res.status(401).json({ message: 'Invalid email or password' });
         }
 
-        const isPasswordValid = await bcrypt.compare(password, user.password);
+        const isPasswordValid = await bcrypt.compare(password, user.password_hash);
         if(!isPasswordValid){
             return res.status(401).json({ message: 'Invalid email or password' });
         }
@@ -78,7 +78,7 @@ export async function loginUser(req : Request, res : Response) : Promise<Respons
         const accessToken = generateAccessToken(user.id, user.name, user.email);
 
         // Store refresh token in database for revocation and session tracking
-        await pool.query('UPDATE users SET refreshToken = $1 WHERE id = $2', [refreshToken, user.id]);
+        await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [refreshToken, user.id]);
 
         res.cookie('refreshToken', refreshToken, {
             ...COOKIE_OPTIONS,
@@ -112,7 +112,7 @@ export async function logoutUser(req : Request, res : Response) : Promise<Respon
         }
 
         // Clear refresh token from database
-        await pool.query('UPDATE users SET refreshToken = NULL WHERE refreshToken = $1', [refreshToken]);
+        await pool.query('UPDATE users SET refresh_token = NULL WHERE refresh_token = $1', [refreshToken]);
 
         res.clearCookie('refreshToken', COOKIE_OPTIONS);
         res.clearCookie('accessToken', COOKIE_OPTIONS);

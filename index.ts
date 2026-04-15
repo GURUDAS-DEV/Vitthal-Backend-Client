@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import cors from 'cors';
 import pool from './DbConnect';
 import AuthRouter from './Routers/Auth.router';
+import productRouter from './Routers/Product.router';
+import VendorsRouter from './Routers/Vendors.Router';
 
 dotenv.config();
 
@@ -32,6 +34,8 @@ pool.connect()
 
 // Define routes
 app.use("/api/auth", AuthRouter);
+app.use("/api/products", productRouter);
+app.use("/api/vendors", VendorsRouter);
 
 
 // Start the server
