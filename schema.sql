@@ -41,11 +41,6 @@ CREATE TABLE IF NOT EXISTS users (
     role user_role NOT NULL DEFAULT 'client',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
 
-    -- Kept for compatibility with current auth flow.
-    name VARCHAR(100),
-    refresh_token TEXT,
-    otp TEXT,
-
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -57,17 +52,13 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS vendors (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL UNIQUE,
+    name TEXT NOT NULL,
     company_name TEXT NOT NULL,
     gst_number TEXT UNIQUE,
     phone TEXT,
-    address TEXT,
-    city TEXT,
-    state TEXT,
-    country TEXT,
-    latitude DOUBLE PRECISION CHECK (latitude BETWEEN -90 AND 90),
-    longitude DOUBLE PRECISION CHECK (longitude BETWEEN -180 AND 180),
     rating NUMERIC(2,1) NOT NULL DEFAULT 0 CHECK (rating >= 0 AND rating <= 5),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_blocked BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -86,13 +77,25 @@ CREATE TABLE IF NOT EXISTS products (
     name TEXT NOT NULL,
     description TEXT,
     category TEXT,
-    subcategory TEXT,
     product_type TEXT,
     specifications JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_products_product_type
         CHECK (product_type IS NULL OR product_type IN ('plastic', 'metal'))
+);
+
+CREATE TABLE IF NOT EXISTS products_images (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL,
+    image_url TEXT NOT NULL,
+    is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT fk_products_images_product
+        FOREIGN KEY (product_id)
+        REFERENCES products(id)
+        ON DELETE CASCADE
 );
 
 -- ================================
@@ -106,7 +109,7 @@ CREATE TABLE IF NOT EXISTS vendor_products (
     price NUMERIC(12,2) NOT NULL CHECK (price >= 0),
     moq INTEGER NOT NULL CHECK (moq > 0),
     stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK (stock_quantity >= 0),
-    lead_time_days INTEGER CHECK (lead_time_days >= 0),
+    commision_percentage INTEGER DEFAULT 0 CHECK (commision_percentage >= 0 AND commision_percentage <= 100),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -122,21 +125,55 @@ CREATE TABLE IF NOT EXISTS vendor_products (
         ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS pricing_tiers (
+CREATE TABLE addresses(
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    vendor_product_id UUID NOT NULL,
-    min_qty INTEGER NOT NULL CHECK (min_qty > 0),
-    max_qty INTEGER,
-    price_per_unit NUMERIC(12,2) NOT NULL CHECK (price_per_unit >= 0),
+    user_id UUID UNIQUE NOT NULL,
+    address TEXT NOT NULL,
+    city TEXT NOT NULL,
+    state TEXT NOT NULL,
+    country TEXT NOT NULL,
+    pincode VARCHAR(6) NOT NULL CHECK (pincode ~ '^[0-9]{6}$'),
+    latitude DOUBLE PRECISION CHECK (latitude BETWEEN -90 AND 90),
+    longitude DOUBLE PRECISION CHECK (longitude BETWEEN -180 AND 180),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT fk_addresses_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE CASCADE
+);
 
-    CONSTRAINT chk_pricing_tiers_qty_range
-        CHECK (max_qty IS NULL OR max_qty >= min_qty),
-    CONSTRAINT unique_tier_start UNIQUE (vendor_product_id, min_qty),
-    CONSTRAINT fk_pricing_tiers_vendor_product
-        FOREIGN KEY (vendor_product_id)
-        REFERENCES vendor_products(id)
+CREATE TABLE client(
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    phone TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT fk_client_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE fulfillment_centers(
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    name TEXT NOT NULL,
+    address TEXT NOT NULL,
+    city TEXT NOT NULL,
+    state TEXT NOT NULL,
+    country TEXT NOT NULL,
+    pincode VARCHAR(6) NOT NULL CHECK (pincode ~ '^[0-9]{6}$'),
+    latitude DOUBLE PRECISION CHECK (latitude BETWEEN -90 AND 90),
+    longitude DOUBLE PRECISION CHECK (longitude BETWEEN -180 AND 180),
+    capacity TEXT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT fk_fulfillment_centers_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id)
         ON DELETE CASCADE
 );
 
@@ -144,59 +181,12 @@ CREATE TABLE IF NOT EXISTS pricing_tiers (
 -- INDEXES
 -- ================================
 
-CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
+-- Optimizing Foreign Keys (Postgres does not index these automatically)
+CREATE INDEX IF NOT EXISTS idx_vendor_products_product_id ON vendor_products(product_id);
+CREATE INDEX IF NOT EXISTS idx_products_images_product_id ON products_images(product_id);
+CREATE INDEX IF NOT EXISTS idx_fulfillment_centers_user_id ON fulfillment_centers(user_id);
 
-CREATE INDEX IF NOT EXISTS idx_vendors_city_state_country
-ON vendors(city, state, country);
-CREATE INDEX IF NOT EXISTS idx_vendors_lat_lng
-ON vendors(latitude, longitude);
-CREATE INDEX IF NOT EXISTS idx_vendors_is_active
-ON vendors(is_active);
-
-CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
-CREATE INDEX IF NOT EXISTS idx_products_category_subcategory
-ON products(category, subcategory);
-
-CREATE INDEX IF NOT EXISTS idx_vendor_products_product_id
-ON vendor_products(product_id);
-CREATE INDEX IF NOT EXISTS idx_vendor_products_vendor_id
-ON vendor_products(vendor_id);
-CREATE INDEX IF NOT EXISTS idx_vendor_products_active_price
-ON vendor_products(is_active, price);
-
-CREATE INDEX IF NOT EXISTS idx_pricing_tiers_vendor_product_id_min_qty
-ON pricing_tiers(vendor_product_id, min_qty);
-
--- ================================
--- AUTO-UPDATE TIMESTAMP FUNCTION + TRIGGERS
--- ================================
-
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DO $$
-DECLARE
-    table_name TEXT;
-BEGIN
-    FOREACH table_name IN ARRAY ARRAY[
-        'users',
-        'vendors',
-        'products',
-        'vendor_products',
-        'pricing_tiers'
-    ]
-    LOOP
-        EXECUTE format('DROP TRIGGER IF EXISTS set_%I_updated_at ON %I;', table_name, table_name);
-        EXECUTE format(
-            'CREATE TRIGGER set_%I_updated_at BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();',
-            table_name,
-            table_name
-        );
-    END LOOP;
-END$$;
-
+-- Optimizing Common Filtering Columns
+CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
+CREATE INDEX IF NOT EXISTS idx_vendors_rating ON vendors(rating DESC) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type);
