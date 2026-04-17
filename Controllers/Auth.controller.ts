@@ -5,34 +5,34 @@ import { generateAccessToken, generateRefreshToken, verifyToken } from "../helpe
 import pool from "../DbConnect";
 import { COOKIE_OPTIONS } from "../shared/CokkieSetting.shared";
 
-export async function registerUser(req : Request, res : Response) : Promise<Response> {
-    const { name, email, password } = req.body;
-    if(!name || !email || !password){
+export async function registerUser(req: Request, res: Response): Promise<Response> {
+    const { name, email, password, role } = req.body;
+    if (!name || !email || !password || !role) {
         return res.status(400).json({ message: 'All fields are required' });
     }
 
-    if(password.length < 6){
+    if (password.length < 6) {
         return res.status(400).json({ message: 'Password must be at least 6 characters long' });
     }
 
-    if(!/^[\w.-]+@[\w.-]+\.\w{2,}$/.test(email)){
+    if (!/^[\w.-]+@[\w.-]+\.\w{2,}$/.test(email)) {
         return res.status(400).json({ message: 'Invalid email format' });
     }
 
-    try{
+    try {
         const hashedPassword = await bcrypt.hash(password, 10);
         const result = await pool.query(
-            'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id, name, email',
-            [name, email, hashedPassword]
+            'INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, email',
+            [name, email, hashedPassword, role]
         );
         const user = result.rows[0];
 
         const refreshToken = generateRefreshToken(user.id, user.name, user.email);
         const accessToken = generateAccessToken(user.id, user.name, user.email);
-        
+
         // Store refresh token in database for revocation and session tracking
         await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [refreshToken, user.id]);
-        
+
         res.cookie('refreshToken', refreshToken, {
             ...COOKIE_OPTIONS,
             maxAge: 45 * 24 * 60 * 60 * 1000, // 45 days
@@ -45,7 +45,7 @@ export async function registerUser(req : Request, res : Response) : Promise<Resp
 
         return res.status(200).json({ message: 'User registered successfully' });
     }
-    catch(error){
+    catch (error) {
         const dbError = error as DatabaseError;
         if (dbError.code === '23505') {
             return res.status(409).json({ message: 'User with this email already exists' });
@@ -55,22 +55,22 @@ export async function registerUser(req : Request, res : Response) : Promise<Resp
     }
 }
 
-export async function loginUser(req : Request, res : Response) : Promise<Response> {
+export async function loginUser(req: Request, res: Response): Promise<Response> {
     const { email, password } = req.body;
 
-    if(!email || !password){
+    if (!email || !password) {
         return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    try{
+    try {
         const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-        const user = result.rows[0];   
-        if(!user){
+        const user = result.rows[0];
+        if (!user) {
             return res.status(401).json({ message: 'Invalid email or password' });
         }
 
         const isPasswordValid = await bcrypt.compare(password, user.password_hash);
-        if(!isPasswordValid){
+        if (!isPasswordValid) {
             return res.status(401).json({ message: 'Invalid email or password' });
         }
 
@@ -92,22 +92,22 @@ export async function loginUser(req : Request, res : Response) : Promise<Respons
 
         return res.status(200).json({ message: 'Login successful' });
     }
-    catch(error){
+    catch (error) {
         console.error('Error logging in user:', error);
         return res.status(500).json({ message: 'Internal server error' });
-    }  
+    }
 }
 
-export async function logoutUser(req : Request, res : Response) : Promise<Response> {
+export async function logoutUser(req: Request, res: Response): Promise<Response> {
     const refreshToken = req.cookies.refreshToken;
-    if(!refreshToken){
+    if (!refreshToken) {
         return res.status(400).json({ message: 'Refresh token is required' });
     }
 
-    try{
+    try {
 
         const isVerified = verifyToken(refreshToken, 'refresh');
-        if(!isVerified){
+        if (!isVerified) {
             return res.status(401).json({ message: 'Invalid refresh token' });
         }
 
@@ -119,7 +119,7 @@ export async function logoutUser(req : Request, res : Response) : Promise<Respon
 
         return res.status(200).json({ message: 'Logout successful' });
     }
-    catch(error){
+    catch (error) {
         console.error('Error logging out user:', error);
         return res.status(500).json({ message: 'Internal server error' });
     }

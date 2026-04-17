@@ -18,8 +18,8 @@ const PORT = 9000;
 const allowedOrigins = ['http://localhost:3000', 'http://localhost:5173',];
 
 app.use("/", cors({
-    origin : allowedOrigins,
-    credentials : true,
+    origin: allowedOrigins,
+    credentials: true,
 }));
 
 //using Middleware
@@ -38,7 +38,8 @@ app.use("/api/products", productRouter);
 app.use("/api/vendors", VendorsRouter);
 
 
+
 // Start the server
-app.listen(PORT, ()=>{
+app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}🚀🚀`);
 })

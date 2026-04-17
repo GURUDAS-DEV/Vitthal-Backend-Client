@@ -1,18 +1,162 @@
 import type { Request, Response } from "express";
+import pool from "../DbConnect";
 
-export const addVendorController = async(req: Request, res: Response) : Promise<void> => {
+export const addVendorController = async (req: Request, res: Response): Promise<void> => {
     const { userId, name, email, phone, address, gstNumber } = req.body;
-    if(!userId || !name || !email || !phone || !address){
-        res.status(400).json({ message : "All fields are required!" });
+    if (!userId || !name || !email || !phone || !address || !gstNumber) {
+        res.status(400).json({ message: "All fields are required!" });
         return;
     }
 
-    try{
-        
+    try {
+        const result = await pool.query(
+            'INSERT INTO vendors (user_id, name, email, phone, address, gst_number) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, email, phone, address, gst_number',
+            [userId, name, email, phone, address, gstNumber]
+        );
+        const vendor = result.rows[0];
+        res.status(201).json({ message: "Vendor added successfully!", vendor });
     }
-    catch(e){
+    catch (e) {
         console.error("Error occurred while adding vendor: ", e);
-        res.status(500).json({ message : "Error occurred while adding vendor!" });
+        res.status(500).json({ message: "Error occurred while adding vendor!" });
+    }
+}
+
+export const updateVendorBasicDetailsController = async (req: Request, res: Response): Promise<Response> => {
+    const { userId, name, email, phone, address, gstNumber } = req.body;
+    if (!userId || !name || !email || !phone || !address || !gstNumber) {
+        return res.status(400).json({ message: "All fields are required!" });
     }
 
+    try {
+        const doesVendorExists = await pool.query(
+            `SELECT * FROM vendors WHERE user_id = $1`,
+            [userId]
+        );
+
+        if (doesVendorExists.rows.length === 0) {
+            return res.status(400).json({ message: "Vendor Does Not Exists with given userId! You have to create new!" });
+        }
+
+        if (doesVendorExists.rows[0].is_blocked === true) {
+            return res.status(400).json({ message: "Vendor is blocked! You cannot update it" });
+        }
+
+        const result = await pool.query(
+            `UPDATE vendors SET name = $1, email = $2, phone = $3, address = $4, gst_number = $5 WHERE user_id = $6 RETURNING id, name, email, phone, address, gst_number`,
+            [name, email, phone, address, gstNumber, userId]
+        );
+        const vendor = result.rows[0];
+
+        return res.status(200).json({ message: "Vendor updated successfully!", vendor });
+    }
+    catch (e) {
+        console.log("Error occurred while updating vendor: ", e);
+        return res.status(500).json({ message: "Error occurred while updating vendor!" });
+    }
+}
+
+export const createVendorAddress = async (req: Request, res: Response): Promise<Response> => {
+    const { userId, address, city, state, country, pincode, latitude, longitude } = req.body;
+    if (!userId || !address || !city || !state || !country || !pincode || !latitude || !longitude) {
+        return res.status(400).json({ message: "All fields are required!" });
+    }
+
+    try {
+
+        const query = `SELECT 
+                            u.id as user_exists,
+                            u.role,
+                            v.is_blocked,
+                            a.id as address_exists
+                        FROM users u
+                        LEFT JOIN vendors v ON u.id = v.user_id
+                        LEFT JOIN addresses a ON u.id = a.user_id
+                        WHERE u.id = $1`;
+
+        const userDetail = await pool.query(query, [userId]);
+
+        if (userDetail.rows.length === 0) {
+            return res.status(400).json({ message: "User does not exist!" });
+        }
+
+        const userDetails = userDetail.rows[0];
+
+        if (userDetails.role !== 'vendor') {
+            return res.status(400).json({ message: "User is not a vendor!" });
+        }
+
+        if (userDetails.is_blocked) {
+            return res.status(400).json({ message: "Vendor is blocked! You cannot create an address! Ask Admin to unblock you!" });
+        }
+
+        if (userDetails.address_exists) {
+            return res.status(400).json({ message: "Address already exists for this user! You can update it" });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO addresses (user_id, address, city, state, country, pincode, latitude, longitude) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, user_id, address, city, state, country, pincode, latitude, longitude`,
+            [userId, address, city, state, country, pincode, latitude, longitude]
+        );
+        const vendorAddress = result.rows[0];
+
+        return res.status(201).json({ message: "Vendor address added successfully!", vendorAddress });
+    }
+    catch (e) {
+        console.log("Error occurred while adding vendor address: ", e);
+        return res.status(500).json({ message: "Error occurred while adding vendor address!" });
+    }
+}
+
+export const updateVendorAddress = async (req: Request, res: Response): Promise<Response> => {
+    const { userId, address, city, state, country, pincode, latitude, longitude } = req.body;
+    if (!userId || !address || !city || !state || !country || !pincode || !latitude || !longitude) {
+        return res.status(400).json({ message: "All fields are required!" });
+    }
+
+    try {
+        const checkQuery = `
+            SELECT 
+                u.id as user_exists,
+                u.role,
+                v.is_blocked,
+                a.id as address_exists
+            FROM users u
+            LEFT JOIN vendors v ON u.id = v.user_id
+            LEFT JOIN addresses a ON u.id = a.user_id
+            WHERE u.id = $1
+        `;
+
+        const checkResult = await pool.query(checkQuery, [userId]);
+
+        if (checkResult.rows.length === 0) {
+            return res.status(400).json({ message: "User does not exist!" });
+        }
+
+        const userDetails = checkResult.rows[0];
+
+        if (userDetails.role !== 'vendor') {
+            return res.status(400).json({ message: "User is not a vendor!" });
+        }
+
+        if (userDetails.is_blocked) {
+            return res.status(400).json({ message: "Vendor is blocked! You cannot update the address! Ask Admin to unblock you!" });
+        }
+
+        if (!userDetails.address_exists) {
+            return res.status(400).json({ message: "Address does not exist for this user! Please create an address first." });
+        }
+
+        const result = await pool.query(
+            `UPDATE addresses SET address = $1, city = $2, state = $3, country = $4, pincode = $5, latitude = $6, longitude = $7 WHERE user_id = $8 RETURNING id, user_id, address, city, state, country, pincode, latitude, longitude`,
+            [address, city, state, country, pincode, latitude, longitude, userId]
+        );
+        const vendorAddress = result.rows[0];
+
+        return res.status(200).json({ message: "Vendor address updated successfully!", vendorAddress });
+    }
+    catch (e) {
+        console.log("Error occurred while updating vendor address: ", e);
+        return res.status(500).json({ message: "Error occurred while updating vendor address!" });
+    }
 }
