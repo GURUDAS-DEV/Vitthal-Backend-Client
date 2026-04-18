@@ -14,7 +14,9 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
                 ...COOKIE_OPTIONS,
                 maxAge: 30 * 60 * 1000,
             });
-            next();
+            const decodedRefreshToken = verifyToken(refreshToken, "refresh");
+            (req as any).user = decodedRefreshToken;
+            return next();
         }
 
         const decodedAccessToken = verifyToken(accessToken, "access");

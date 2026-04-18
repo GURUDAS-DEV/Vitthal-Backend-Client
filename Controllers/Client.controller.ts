@@ -4,7 +4,13 @@ import pool from "../DbConnect";
 
 export const addClientDetailsController = async (req: Request, res: Response): Promise<Response> => {
     const { address, city, state, country, pincode, latitude, longitude, phone } = req.body;
-    const { userId, role } = (req as any).user;
+    const authUser = (req as any).user;
+
+    if (!authUser?.userId || !authUser?.role) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { userId, role } = authUser;
 
     if (!userId || !address || !city || !state || !country || !pincode || latitude === undefined || longitude === undefined || !phone) {
         return res.status(400).json({ message: "All fields are required!" });
@@ -68,7 +74,13 @@ export const addClientDetailsController = async (req: Request, res: Response): P
 
 export const updateClientAddressController = async (req: Request, res: Response): Promise<Response> => {
     const { address, city, state, country, pincode, latitude, longitude } = req.body;
-    const { userId, role } = (req as any).user;
+    const authUser = (req as any).user;
+
+    if (!authUser?.userId || !authUser?.role) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { userId, role } = authUser;
     if (!userId || !address || !city || !state || !country || !pincode || latitude === undefined || longitude === undefined) {
         return res.status(400).json({ message: "All fields are required!" });
     }
@@ -110,7 +122,13 @@ export const updateClientAddressController = async (req: Request, res: Response)
 }
 
 export const updateClientNumberController = async (req: Request, res: Response): Promise<Response> => {
-    const { userId, role } = (req as any).user;
+    const authUser = (req as any).user;
+
+    if (!authUser?.userId || !authUser?.role) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { userId, role } = authUser;
     if (role != 'client')
         return res.status(403).json({ message: "Unauthorized! Only clients can update their phone number!" });
 
@@ -118,7 +136,9 @@ export const updateClientNumberController = async (req: Request, res: Response):
         return res.status(400).json({ message: "User ID is required!" });
 
     const { phone } = req.body;
-    if (!phone)
+    const normalizedPhone = typeof phone === "string" ? phone.trim() : "";
+
+    if (!normalizedPhone)
         return res.status(400).json({ message: "Phone number is required to update!" });
 
     try {
@@ -132,8 +152,12 @@ export const updateClientNumberController = async (req: Request, res: Response):
         }
 
         const updateResult = await pool.query(
-            `UPDATE client SET phone = $1, updated_at = NOW() WHERE user_id = $2 RETURNING *`,
-            [phone, userId]
+            `UPDATE client
+             SET phone = $1,
+                 updated_at = NOW()
+             WHERE user_id = $2
+             RETURNING *`,
+            [normalizedPhone, userId]
         );
 
         if (updateResult.rows.length === 0) {
@@ -149,7 +173,13 @@ export const updateClientNumberController = async (req: Request, res: Response):
 }
 
 export const clientDetails = async (req: Request, res: Response): Promise<Response> => {
-    const { userId, role } = (req as any).user;
+    const authUser = (req as any).user;
+
+    if (!authUser?.userId || !authUser?.role) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { userId, role } = authUser;
 
     if (!userId || !role)
         return res.status(400).json({ message: "Required all field" });
@@ -191,7 +221,7 @@ export const clientDetails = async (req: Request, res: Response): Promise<Respon
         });
     }
     catch (e) {
-        console.log("Error : ", e);
+        console.error("Error : ", e);
         return res.status(500).json({ message: 'internal server error' });
     }
 }
