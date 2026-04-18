@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { addClientBasicDetailsController, updateClientBasicDetailsController, addClientAddressController, updateClientAddressController } from "../Controllers/Client.controller";
+import { updateClientAddressController, addClientDetailsController, updateClientNumberController, clientDetails } from "../Controllers/Client.controller";
 import { authMiddleware } from "../Middleware/AuthMiddleware";
 
 
@@ -7,9 +7,9 @@ const clientRouter = Router();
 
 clientRouter.use(authMiddleware);
 
-clientRouter.post("/addClientBasicDetails", addClientBasicDetailsController);
-clientRouter.patch("/updateClientBasicDetails", updateClientBasicDetailsController);
-clientRouter.post("/addClientAddress", addClientAddressController);
+clientRouter.post("/addClientDetails", addClientDetailsController);
 clientRouter.patch("/updateClientAddress", updateClientAddressController);
+clientRouter.patch("/updateClientNumber", updateClientNumberController);
+clientRouter.get("/clientDetails", clientDetails);
 
 export default clientRouter;

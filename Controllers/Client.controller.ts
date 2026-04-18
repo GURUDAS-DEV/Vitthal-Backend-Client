@@ -1,120 +1,78 @@
 import type { Request, Response } from "express"
 import pool from "../DbConnect";
 
-export const addClientBasicDetailsController = async (req: Request, res: Response): Promise<Response> => {
-    const { userId, name, phone } = req.body;
-    if (!userId || !name || !phone) {
+
+export const addClientDetailsController = async (req: Request, res: Response): Promise<Response> => {
+    const { address, city, state, country, pincode, latitude, longitude, phone } = req.body;
+    const { userId, role } = (req as any).user;
+
+    if (!userId || !address || !city || !state || !country || !pincode || latitude === undefined || longitude === undefined || !phone) {
         return res.status(400).json({ message: "All fields are required!" });
     }
 
-    const { role } = (req as any).user;
-    if (role != 'client')
-        return res.status(403).json({ message: "Unauthorized! Only clients can add clients!" });
-
-    try {
-        const doesClientExists = await pool.query(
-            `SELECT * FROM clients WHERE user_id = $1`,
-            [userId]
-        );
-        if (doesClientExists.rows.length > 0) {
-            return res.status(400).json({ message: "Client already exists!" });
-        }
-
-        const result = await pool.query(
-            `INSERT INTO clients (user_id, name, phone) VALUES ($1, $2, $3) RETURNING *`,
-            [userId, name, phone]
-        );
-        const client = result.rows[0];
-        return res.status(201).json({ message: "Client added successfully!", client });
-    }
-    catch (e) {
-        console.error("Error occurred while adding client: ", e);
-        return res.status(500).json({ message: "Error occurred while adding client!" });
-    }
-}
-
-export const updateClientBasicDetailsController = async (req: Request, res: Response): Promise<Response> => {
-    const { userId, name, phone } = req.body;
-    if (!userId || !name || !phone) {
-        return res.status(400).json({ message: "All fields are required!" });
-    }
-
-    const { role } = (req as any).user;
-    if (role != 'client')
-        return res.status(403).json({ message: "Unauthorized! Only clients can update their basic details!" });
-
-    try {
-        const doesClientExists = await pool.query(
-            `SELECT * FROM clients WHERE user_id = $1`,
-            [userId]
-        );
-        if (doesClientExists.rows.length === 0) {
-            return res.status(404).json({ message: "Client not found!" });
-        }
-
-        const result = await pool.query(
-            `UPDATE clients SET name = $1, phone = $2 WHERE user_id = $3 RETURNING *`,
-            [name, phone, userId]
-        );
-        const client = result.rows[0];
-        return res.status(200).json({ message: "Client basic details updated successfully!", client });
-    }
-    catch (e) {
-        console.error("Error occurred while updating client basic details: ", e);
-        return res.status(500).json({ message: "Error occurred while updating client basic details!" });
-    }
-}
-
-export const addClientAddressController = async (req: Request, res: Response): Promise<Response> => {
-    const { userId, address, city, state, country, pincode, latitude, longitude } = req.body;
-    
-    if (!userId || !address || !city || !state || !country || !pincode || latitude === undefined || longitude === undefined) {
-        return res.status(400).json({ message: "All fields are required!" });
-    }
-
-    const { role } = (req as any).user;
     if (role != 'client')
         return res.status(403).json({ message: "Unauthorized! Only clients can add addresses!" });
 
     try {
-        const doesUserClientExist = await pool.query(
-            `SELECT id FROM users WHERE id = $1 AND role = 'client' AND is_active = true`,
-            [userId]
-        );
-        if (doesUserClientExist.rows.length === 0) {
+        const clientQuery = await pool.query(`
+            SELECT u.id, c.id as client_id, a.id as address_id 
+            FROM users u
+            LEFT JOIN client c ON u.id = c.user_id
+            LEFT JOIN addresses a ON u.id = a.user_id
+            WHERE u.id = $1 AND u.role = 'client' AND u.is_active = true
+        `, [userId]);
+
+        if (clientQuery.rows.length === 0) {
             return res.status(404).json({ message: "Client not found or not active!" });
         }
 
-        const doesAddressExists = await pool.query(
-            `SELECT * FROM addresses WHERE user_id = $1`,
-            [userId]
-        );
-        if (doesAddressExists.rows.length > 0) {
-            return res.status(400).json({ message: "Address already exists for this client!" });
+        const { client_id, address_id } = clientQuery.rows[0];
+
+        if (client_id && address_id) {
+            return res.status(400).json({ message: "Client details already exist. You can update them, but cannot add again." });
         }
 
-        const result = await pool.query(
-            `INSERT INTO addresses (user_id, address, city, state, country, pincode, latitude, longitude) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-            [userId, address, city, state, country, pincode, latitude, longitude]
-        );
-        const newAddress = result.rows[0];
-        return res.status(201).json({ message: "Client address added successfully!", address: newAddress });
+        // Use a transaction since we are inserting into multiple tables
+        await pool.query('BEGIN');
+
+        let newClient = null;
+        let newAddress = null;
+
+        if (!client_id) {
+            const clientResult = await pool.query(
+                `INSERT INTO client (user_id, phone) VALUES ($1, $2) RETURNING *`,
+                [userId, phone]
+            );
+            newClient = clientResult.rows[0];
+        }
+
+        if (!address_id) {
+            const addressResult = await pool.query(
+                `INSERT INTO addresses (user_id, address, city, state, country, pincode, latitude, longitude) 
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                [userId, address, city, state, country, pincode, latitude, longitude]
+            );
+            newAddress = addressResult.rows[0];
+        }
+
+        await pool.query('COMMIT');
+
+        return res.status(201).json({ message: "Client details added successfully!", client: newClient, address: newAddress });
     }
     catch (e) {
-        console.error("Error occurred while adding client address: ", e);
-        return res.status(500).json({ message: "Error occurred while adding client address!" });
+        await pool.query('ROLLBACK');
+        console.error("Error occurred while adding client details: ", e);
+        return res.status(500).json({ message: "Error occurred while adding client details!" });
     }
 }
 
 export const updateClientAddressController = async (req: Request, res: Response): Promise<Response> => {
-    const { userId, address, city, state, country, pincode, latitude, longitude } = req.body;
-    
+    const { address, city, state, country, pincode, latitude, longitude } = req.body;
+    const { userId, role } = (req as any).user;
     if (!userId || !address || !city || !state || !country || !pincode || latitude === undefined || longitude === undefined) {
         return res.status(400).json({ message: "All fields are required!" });
     }
 
-    const { role } = (req as any).user;
     if (role != 'client')
         return res.status(403).json({ message: "Unauthorized! Only clients can update their address!" });
 
@@ -123,7 +81,7 @@ export const updateClientAddressController = async (req: Request, res: Response)
             `SELECT id FROM users WHERE id = $1 AND role = 'client' AND is_active = true`,
             [userId]
         );
-        
+
         if (doesUserClientExist.rows.length === 0) {
             return res.status(404).json({ message: "Client not found or not active!" });
         }
@@ -148,5 +106,92 @@ export const updateClientAddressController = async (req: Request, res: Response)
     catch (e) {
         console.error("Error occurred while updating client address: ", e);
         return res.status(500).json({ message: "Error occurred while updating client address!" });
+    }
+}
+
+export const updateClientNumberController = async (req: Request, res: Response): Promise<Response> => {
+    const { userId, role } = (req as any).user;
+    if (role != 'client')
+        return res.status(403).json({ message: "Unauthorized! Only clients can update their phone number!" });
+
+    if (!userId)
+        return res.status(400).json({ message: "User ID is required!" });
+
+    const { phone } = req.body;
+    if (!phone)
+        return res.status(400).json({ message: "Phone number is required to update!" });
+
+    try {
+        const doesUserClientExist = await pool.query(
+            `SELECT id FROM users WHERE id = $1 AND role = 'client' AND is_active = true`,
+            [userId]
+        );
+
+        if (doesUserClientExist.rows.length === 0) {
+            return res.status(404).json({ message: "Client not found or not active!" });
+        }
+
+        const updateResult = await pool.query(
+            `UPDATE client SET phone = $1, updated_at = NOW() WHERE user_id = $2 RETURNING *`,
+            [phone, userId]
+        );
+
+        if (updateResult.rows.length === 0) {
+            return res.status(404).json({ message: "Client details not found. Please add them first." });
+        }
+
+        return res.status(200).json({ message: "Client phone updated successfully!", client: updateResult.rows[0] });
+    }
+    catch (e) {
+        console.error("Error occurred while updating client phone: ", e);
+        return res.status(500).json({ message: "Error occurred while updating client phone!" });
+    }
+}
+
+export const clientDetails = async (req: Request, res: Response): Promise<Response> => {
+    const { userId, role } = (req as any).user;
+
+    if (!userId || !role)
+        return res.status(400).json({ message: "Required all field" });
+
+    if (role !== 'client') {
+        return res.status(403).json({ message: "Unauthorized! Only clients can access their details." });
+    }
+
+    try {
+        const query = `
+            SELECT 
+                u.id AS user_id, 
+                u.name AS user_name, 
+                u.email, 
+                u.is_active,
+                c.phone, 
+                a.address, 
+                a.city, 
+                a.state, 
+                a.country, 
+                a.pincode, 
+                a.latitude, 
+                a.longitude
+            FROM users u
+            LEFT JOIN client c ON u.id = c.user_id
+            LEFT JOIN addresses a ON u.id = a.user_id
+            WHERE u.id = $1 AND u.role = 'client'
+        `;
+
+        const result = await pool.query(query, [userId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Client not found." });
+        }
+
+        return res.status(200).json({ 
+            message: "Client details fetched successfully",
+            data: result.rows[0]
+        });
+    }
+    catch (e) {
+        console.log("Error : ", e);
+        return res.status(500).json({ message: 'internal server error' });
     }
 }

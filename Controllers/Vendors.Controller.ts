@@ -2,8 +2,9 @@ import type { Request, Response } from "express";
 import pool from "../DbConnect";
 
 export const addVendorController = async (req: Request, res: Response): Promise<Response> => {
-    const { userId, name, companyName, phone, gstNumber } = req.body;
-    if (!userId || !name || !companyName || !phone || !gstNumber) {
+    const { companyName, phone, gstNumber } = req.body;
+    const { userId } = (req as any).user;
+    if (!userId || !companyName || !phone || !gstNumber) {
         return res.status(400).json({ message: "All fields are required!" });
     }
 
@@ -13,8 +14,8 @@ export const addVendorController = async (req: Request, res: Response): Promise<
 
     try {
         const result = await pool.query(
-            'INSERT INTO vendors (user_id, name, phone, gst_number, company_name) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, phone, address, gst_number',
-            [userId, name, phone, gstNumber, companyName]
+            'INSERT INTO vendors (user_id, phone, gst_number, company_name) VALUES ($1, $2, $3, $4) RETURNING id, name, email, phone, address, gst_number',
+            [userId, phone, gstNumber, companyName]
         );
         const vendor = result.rows[0];
         return res.status(201).json({ message: "Vendor added successfully!", vendor });
@@ -26,8 +27,9 @@ export const addVendorController = async (req: Request, res: Response): Promise<
 }
 
 export const updateVendorBasicDetailsController = async (req: Request, res: Response): Promise<Response> => {
-    const { userId, name, companyName, phone, gstNumber } = req.body;
-    if (!userId || !name || !companyName || !phone || !gstNumber) {
+    const { companyName, phone, gstNumber } = req.body;
+    const { userId } = (req as any).user;
+    if (!userId || !companyName || !phone || !gstNumber) {
         return res.status(400).json({ message: "All fields are required!" });
     }
 
@@ -51,8 +53,8 @@ export const updateVendorBasicDetailsController = async (req: Request, res: Resp
         }
 
         const result = await pool.query(
-            `UPDATE vendors SET name = $1, phone = $2, gst_number = $3, company_name = $4 WHERE user_id = $5 RETURNING id, name, phone, gst_number, company_name`,
-            [name, phone, gstNumber, companyName, userId]
+            `UPDATE vendors SET phone = $1, gst_number = $2, company_name = $3 WHERE user_id = $4 RETURNING id, phone, gst_number, company_name`,
+            [phone, gstNumber, companyName, userId]
         );
         const vendor = result.rows[0];
 
@@ -65,7 +67,8 @@ export const updateVendorBasicDetailsController = async (req: Request, res: Resp
 }
 
 export const createVendorAddress = async (req: Request, res: Response): Promise<Response> => {
-    const { userId, address, city, state, country, pincode, latitude, longitude } = req.body;
+    const { address, city, state, country, pincode, latitude, longitude } = req.body;
+    const { userId } = (req as any).user;
     if (!userId || !address || !city || !state || !country || !pincode || !latitude || !longitude) {
         return res.status(400).json({ message: "All fields are required!" });
     }

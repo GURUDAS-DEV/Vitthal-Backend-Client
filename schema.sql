@@ -36,11 +36,12 @@ END$$;
 
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
     email CITEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role user_role NOT NULL DEFAULT 'client',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
-
+    refresh_token TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -52,7 +53,6 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS vendors (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL UNIQUE,
-    name TEXT NOT NULL,
     company_name TEXT NOT NULL,
     gst_number TEXT UNIQUE,
     phone TEXT,
@@ -146,7 +146,6 @@ CREATE TABLE addresses(
 CREATE TABLE client(
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL UNIQUE,
-    name TEXT NOT NULL,
     phone TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
