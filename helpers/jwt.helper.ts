@@ -6,38 +6,39 @@ type TokenPayload = JwtPayload & {
     userId: string;
     username: string;
     email: string;
+    role: string;
     type: TokenType;
 };
 
 function isTokenPayload(decoded: string | JwtPayload): decoded is TokenPayload {
     return typeof decoded === 'object' && decoded !== null
-    && typeof decoded.userId === 'string'
+        && typeof decoded.userId === 'string'
         && typeof decoded.username === 'string'
         && typeof decoded.email === 'string'
         && (decoded.type === 'access' || decoded.type === 'refresh');
 }
 
-export function generateRefreshToken(userId: string, username: string, email: string): string {
+export function generateRefreshToken(userId: string, username: string, email: string, role: string): string {
     try {
-        const payload = { userId, username, email, type: 'refresh' };
+        const payload: TokenPayload = { userId, username, email, role, type: 'refresh' };
         const secretKey = process.env.REFRESH_TOKEN_SECRET;
         if (!secretKey) {
             throw new Error('Refresh token secret key is not defined');
         }
         const options: SignOptions = { expiresIn: '45d' };
         const refreshToken = jwt.sign(payload, secretKey, options);
-        
+
         return refreshToken;
     }
     catch (error) {
         console.error('Error generating refresh token:', error);
         throw new Error('Failed to generate refresh token');
     }
-}   
+}
 
-export function generateAccessToken(userId: string, username: string, email: string): string {
+export function generateAccessToken(userId: string, username: string, email: string, role: string): string {
     try {
-        const payload = { userId, username, email, type: 'access' };
+        const payload: TokenPayload = { userId, username, email, role, type: 'access' };
         const secretKey = process.env.ACCESS_TOKEN_SECRET;
         if (!secretKey) {
             throw new Error('Access token secret key is not defined');
@@ -53,14 +54,14 @@ export function generateAccessToken(userId: string, username: string, email: str
     }
 }
 
-export function verifyToken(token: string, type: TokenType): { userId: string, username: string, email: string } {
+export function verifyToken(token: string, type: TokenType): { userId: string, username: string, email: string, role: string } {
     try {
         const secretKey = type === 'access' ? process.env.ACCESS_TOKEN_SECRET : process.env.REFRESH_TOKEN_SECRET;
         if (!secretKey) {
             throw new Error('Token secret key is not defined');
         }
 
-        const decoded = jwt.verify(token, secretKey) as string | JwtPayload;
+        const decoded: TokenPayload = jwt.verify(token, secretKey) as TokenPayload;
         if (!isTokenPayload(decoded)) {
             throw new Error('Invalid token payload');
         }
@@ -68,8 +69,8 @@ export function verifyToken(token: string, type: TokenType): { userId: string, u
         if (decoded.type !== type) {
             throw new Error('Invalid token type');
         }
-        
-        return { userId: decoded.userId, username: decoded.username, email: decoded.email };
+
+        return { userId: decoded.userId, username: decoded.username, email: decoded.email, role: decoded.role };
     }
     catch (error) {
         console.error('Error verifying token:', error);

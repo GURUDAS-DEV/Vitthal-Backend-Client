@@ -1,0 +1,289 @@
+import type { Request, Response } from "express";
+import pool from "../DbConnect";
+
+export const addProductController = async (req: Request, res: Response): Promise<Response> => {
+    const { name, description, category, productType, specification } = req.body;
+
+    const { role } = (req as any).user;
+    if (!name || !description || !category || !productType || !specification) {
+        return res.status(400).json({ message: "All fields are required" });
+    }
+
+    if (role !== "admin" || role !== "super_admin") {
+        return res.status(403).json({ message: "Unauthorized! Only admins and super admins can add products." });
+    }
+
+    try {
+        const query = `INSERT INTO products (name, description, category, product_type, specification) VALUES ($1, $2, $3, $4, $5)`;
+        const values = [name, description, category, productType, specification];
+        const result = await pool.query(query, values);
+        return res.status(201).json({ message: "Product added successfully", result });
+    }
+    catch (error) {
+        console.log("Error while adding Products : ", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+export const deleteProduct = async (req: Request, res: Response): Promise<Response> => {
+    const { productId } = req.body;
+    const { role } = (req as any).user;
+
+    if (!productId) {
+        return res.status(400).json({ message: "Product ID is required" });
+    }
+
+    if (role !== "admin" || role !== "super_admin") {
+        return res.status(403).json({ message: "Unauthorized! Only admins and super admins can delete products." });
+    }
+
+    try {
+        const query = `DELETE FROM products WHERE id = $1`;
+        const values = [productId];
+        const result = await pool.query(query, values);
+        return res.status(200).json({ message: "Product deleted successfully", result });
+    }
+    catch (error) {
+        console.log("Error while deleting Products : ", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+export const updateProduct = async (req: Request, res: Response): Promise<Response> => {
+    const { productId, name, description, category, productType, specification } = req.body;
+    const { role } = (req as any).user;
+
+    if (!productId) {
+        return res.status(400).json({ message: "Product ID is required" });
+    }
+
+    if (role !== "admin" || role !== "super_admin") {
+        return res.status(403).json({ message: "Unauthorized! Only admins and super admins can update products." });
+    }
+
+    try {
+        const query = `UPDATE products SET name = $1, description = $2, category = $3, product_type = $4, specification = $5 WHERE id = $6`;
+        const values = [name, description, category, productType, specification, productId];
+        const result = await pool.query(query, values);
+        return res.status(200).json({ message: "Product updated successfully", result });
+    }
+    catch (error) {
+        console.log("Error while updating Products : ", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+export const getAllProducts = async (req: Request, res: Response): Promise<Response> => {
+    try {
+        const { offset } = req.query;
+        if (!offset || isNaN(Number(offset))) {
+            return res.status(400).json({ message: "Invalid offset value" });
+        }
+        const offsetValue = Number(offset) * 20; // Assuming 20 products per page
+        const query = `
+            SELECT 
+                p.id AS product_id,
+                p.name AS product_name,
+                p.description,
+                p.category,
+                p.product_type,
+                p.specifications,
+
+                -- Primary image
+                pImg.image_url AS primary_image,
+
+                -- Seller count
+                COALESCE(vc.vendor_count, 0) AS seller_count
+
+            FROM (
+                SELECT id, name, description, category, product_type, specifications
+                FROM products
+                LIMIT 20 OFFSET $1
+            ) p
+
+            -- Primary image (no duplication)
+            LEFT JOIN product_images pImg 
+                ON p.id = pImg.product_id 
+                AND pImg.is_primary = true
+
+            -- Vendor count (lightweight aggregation)
+            LEFT JOIN (
+                SELECT product_id, COUNT(DISTINCT vendor_id) AS vendor_count
+                FROM vendor_products
+                GROUP BY product_id
+            ) vc 
+            ON p.id = vc.product_id;
+        `;
+
+        const result = await pool.query(query, [offsetValue]);
+        return res.status(200).json({ message: "Products fetched successfully", data: result.rows });
+    }
+    catch (e) {
+        console.log("Error while fetching Products : ", e);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+export const getProductById = async (req: Request, res: Response): Promise<Response> => {
+    const { productId } = req.params;
+    if (!productId) {
+        return res.status(400).json({ message: "Product ID is required" });
+    }
+
+    try {
+        const query = `
+           SELECT 
+                p.id AS product_id,
+                p.name AS product_name,
+                p.description,
+                p.category,
+                p.product_type,
+                p.specifications,
+
+                -- Images array
+                COALESCE(
+                    JSON_AGG(
+                        JSONB_BUILD_OBJECT(
+                            'image_url', pImg.image_url,
+                            'is_primary', pImg.is_primary,
+                            'display_order', pImg.display_order
+                        )
+                        ORDER BY pImg.display_order
+                    ) FILTER (WHERE pImg.id IS NOT NULL),
+                    '[]'
+                ) AS images
+
+                -- Vendors array
+                COALESCE(
+                    JSON_AGG(DISTINCT JSONB_BUILD_OBJECT(
+                        'vendor_id', v.id,
+                        'vendor_name', v.name,
+                        'company_name', v.company_name,
+                        'price', vp.price,
+                        'moq', vp.moq,
+                        'stock_quantity', vp.stock_quantity
+                    )) FILTER (WHERE v.id IS NOT NULL),
+                    '[]'
+                ) AS vendors
+
+            FROM products p
+            LEFT JOIN product_images pImg ON p.id = pImg.product_id
+            LEFT JOIN vendor_products vp ON p.id = vp.product_id
+            LEFT JOIN vendors v ON vp.vendor_id = v.id
+
+            WHERE p.id = $1
+
+            GROUP BY p.id;
+        `;
+        const result = await pool.query(query, [productId]);
+
+        return res.status(200).json({ message: "Product fetched successfully", data: result.rows[0] });
+    }
+    catch (e) {
+        console.log("Error while fetching Product by Id : ", e);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+export const getProductsByCategory = async (req: Request, res: Response): Promise<Response> => {
+    const validCategories = ['plastic', 'metal', 'steel'];
+    const { category } = req.params;
+    const { offset } = req.query;
+
+    try{
+        if(!category || typeof category !== "string" || !validCategories.includes(category))
+            return res.status(400).json({ message: "Invalid category! Category should be either plastic, metal or steel!" });
+
+        if (!offset || isNaN(Number(offset)))
+            return res.status(400).json({ message: "Invalid offset value" });
+
+        const query = `
+            SELECT 
+                p.id AS product_id,
+                p.name AS product_name,
+                p.description,
+                p.category,
+                p.product_type,
+
+                -- Primary image
+                pImg.image_url AS primary_image,
+
+                -- Vendor count (optimized)
+                COALESCE(vc.vendor_count, 0) AS vendor_count
+
+            FROM (
+                SELECT id, name, description, category, product_type
+                FROM products
+                WHERE category = $1
+                LIMIT 20 OFFSET $2
+            ) p
+
+            -- Primary image (no duplication)
+            LEFT JOIN product_images pImg 
+                ON p.id = pImg.product_id 
+                AND pImg.is_primary = true
+
+            -- Vendor count (ONLY for selected products)
+            LEFT JOIN LATERAL (
+                SELECT COUNT(DISTINCT vendor_id) AS vendor_count
+                FROM vendor_products vp
+                WHERE vp.product_id = p.id
+            ) vc ON true;
+        `;
+
+        const result = await pool.query(query, [category, Number(offset) * 20]);
+        return res.status(200).json({ message: "Products fetched successfully", data: result.rows });
+    }
+    catch(e){
+        console.log("Error while fetching Product by category : ", e);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+export const getProductByName = async (req: Request, res: Response): Promise<Response> => {
+    const { name } = req.query;
+    const { offset } = req.query;
+    
+    if (!name || typeof name !== "string") {
+        return res.status(400).json({ message: "Product name is required and should be a string" });
+    }
+
+    try{
+        //fuzzy search using ILIKE for case-insensitive partial matching
+        const query = `
+            SELECT 
+                p.id AS product_id,
+                p.name AS product_name,
+                p.description,
+                p.category,
+                p.product_type,
+
+                pImg.image_url AS primary_image,
+
+                COALESCE(vc.vendor_count, 0) AS vendor_count
+
+            FROM (
+                SELECT id, name, description, category, product_type
+                FROM products
+                WHERE name ILIKE $1
+                LIMIT 20 OFFSET $2
+            ) p
+
+            LEFT JOIN product_images pImg 
+                ON p.id = pImg.product_id 
+                AND pImg.is_primary = true
+
+            LEFT JOIN LATERAL (
+                SELECT COUNT(DISTINCT vendor_id) AS vendor_count
+                FROM vendor_products vp
+                WHERE vp.product_id = p.id
+            ) vc ON true;
+        `;
+        const result = await pool.query(query, [`%${name}%`, Number(offset) * 20]);
+        return res.status(200).json({ message: "Product fetched successfully", data: result.rows });
+    }
+    catch (e) {
+        console.log("Error while fetching Product by name : ", e);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}

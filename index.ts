@@ -6,6 +6,7 @@ import pool from './DbConnect';
 import AuthRouter from './Routers/Auth.router';
 import productRouter from './Routers/Product.router';
 import VendorsRouter from './Routers/Vendors.Router';
+import clientRouter from './Routers/ClientRouter';
 
 dotenv.config();
 
@@ -36,8 +37,7 @@ pool.connect()
 app.use("/api/auth", AuthRouter);
 app.use("/api/products", productRouter);
 app.use("/api/vendors", VendorsRouter);
-
-
+app.use("/api/client", clientRouter);
 
 // Start the server
 app.listen(PORT, () => {

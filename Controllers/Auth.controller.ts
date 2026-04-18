@@ -27,8 +27,8 @@ export async function registerUser(req: Request, res: Response): Promise<Respons
         );
         const user = result.rows[0];
 
-        const refreshToken = generateRefreshToken(user.id, user.name, user.email);
-        const accessToken = generateAccessToken(user.id, user.name, user.email);
+        const refreshToken = generateRefreshToken(user.id, user.name, user.email, role);
+        const accessToken = generateAccessToken(user.id, user.name, user.email, role);
 
         // Store refresh token in database for revocation and session tracking
         await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [refreshToken, user.id]);
@@ -74,8 +74,8 @@ export async function loginUser(req: Request, res: Response): Promise<Response> 
             return res.status(401).json({ message: 'Invalid email or password' });
         }
 
-        const refreshToken = generateRefreshToken(user.id, user.name, user.email);
-        const accessToken = generateAccessToken(user.id, user.name, user.email);
+        const refreshToken = generateRefreshToken(user.id, user.name, user.email, user.role);
+        const accessToken = generateAccessToken(user.id, user.name, user.email, user.role);
 
         // Store refresh token in database for revocation and session tracking
         await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [refreshToken, user.id]);

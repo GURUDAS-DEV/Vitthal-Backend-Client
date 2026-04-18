@@ -1,32 +1,40 @@
 import type { Request, Response } from "express";
 import pool from "../DbConnect";
 
-export const addVendorController = async (req: Request, res: Response): Promise<void> => {
-    const { userId, name, email, phone, address, gstNumber } = req.body;
-    if (!userId || !name || !email || !phone || !address || !gstNumber) {
-        res.status(400).json({ message: "All fields are required!" });
-        return;
+export const addVendorController = async (req: Request, res: Response): Promise<Response> => {
+    const { userId, name, companyName, phone, gstNumber } = req.body;
+    if (!userId || !name || !companyName || !phone || !gstNumber) {
+        return res.status(400).json({ message: "All fields are required!" });
     }
+
+    const { role } = (req as any).user;
+    if (role != 'vendor')
+        return res.status(403).json({ message: "Unauthorized! Only vendors can add vendors!" });
 
     try {
         const result = await pool.query(
-            'INSERT INTO vendors (user_id, name, email, phone, address, gst_number) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, email, phone, address, gst_number',
-            [userId, name, email, phone, address, gstNumber]
+            'INSERT INTO vendors (user_id, name, phone, gst_number, company_name) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, phone, address, gst_number',
+            [userId, name, phone, gstNumber, companyName]
         );
         const vendor = result.rows[0];
-        res.status(201).json({ message: "Vendor added successfully!", vendor });
+        return res.status(201).json({ message: "Vendor added successfully!", vendor });
     }
     catch (e) {
         console.error("Error occurred while adding vendor: ", e);
-        res.status(500).json({ message: "Error occurred while adding vendor!" });
+        return res.status(500).json({ message: "Error occurred while adding vendor!" });
     }
 }
 
 export const updateVendorBasicDetailsController = async (req: Request, res: Response): Promise<Response> => {
-    const { userId, name, email, phone, address, gstNumber } = req.body;
-    if (!userId || !name || !email || !phone || !address || !gstNumber) {
+    const { userId, name, companyName, phone, gstNumber } = req.body;
+    if (!userId || !name || !companyName || !phone || !gstNumber) {
         return res.status(400).json({ message: "All fields are required!" });
     }
+
+    const { role } = (req as any).user;
+    if (role != 'vendor')
+        return res.status(403).json({ message: "Unauthorized! Only vendors can add vendors!" });
+
 
     try {
         const doesVendorExists = await pool.query(
@@ -43,8 +51,8 @@ export const updateVendorBasicDetailsController = async (req: Request, res: Resp
         }
 
         const result = await pool.query(
-            `UPDATE vendors SET name = $1, email = $2, phone = $3, address = $4, gst_number = $5 WHERE user_id = $6 RETURNING id, name, email, phone, address, gst_number`,
-            [name, email, phone, address, gstNumber, userId]
+            `UPDATE vendors SET name = $1, phone = $2, gst_number = $3, company_name = $4 WHERE user_id = $5 RETURNING id, name, phone, gst_number, company_name`,
+            [name, phone, gstNumber, companyName, userId]
         );
         const vendor = result.rows[0];
 
@@ -61,6 +69,10 @@ export const createVendorAddress = async (req: Request, res: Response): Promise<
     if (!userId || !address || !city || !state || !country || !pincode || !latitude || !longitude) {
         return res.status(400).json({ message: "All fields are required!" });
     }
+
+    const { role } = (req as any).user;
+    if (role != 'vendor')
+        return res.status(403).json({ message: "Unauthorized! Only vendors can add vendors!" });
 
     try {
 
@@ -113,6 +125,10 @@ export const updateVendorAddress = async (req: Request, res: Response): Promise<
     if (!userId || !address || !city || !state || !country || !pincode || !latitude || !longitude) {
         return res.status(400).json({ message: "All fields are required!" });
     }
+
+    const { role } = (req as any).user;
+    if (role != 'vendor')
+        return res.status(403).json({ message: "Unauthorized! Only vendors can add vendors!" });
 
     try {
         const checkQuery = `
