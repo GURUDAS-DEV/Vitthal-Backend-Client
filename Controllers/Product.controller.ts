@@ -1,21 +1,39 @@
 import type { Request, Response } from "express";
 import pool from "../DbConnect";
 
+const actionTaker = ['super_admin', 'admin'];
+
 export const addProductController = async (req: Request, res: Response): Promise<Response> => {
-    const { name, description, category, productType, specification } = req.body;
+    const { name, description, category, productType, specifications } = req.body;
 
     const { role } = (req as any).user;
-    if (!name || !description || !category || !productType || !specification) {
+    if (!name || !description || !category || !productType || !specifications) {
         return res.status(400).json({ message: "All fields are required" });
     }
 
-    if (role !== "admin" || role !== "super_admin") {
+    let parsedSpecifications: Record<string, unknown> | unknown[];
+    if (typeof specifications === "string") {
+        try {
+            parsedSpecifications = JSON.parse(specifications);
+        }
+        catch {
+            return res.status(400).json({ message: "Specifications must be valid JSON." });
+        }
+    }
+    else if (typeof specifications === "object" && specifications !== null) {
+        parsedSpecifications = specifications;
+    }
+    else {
+        return res.status(400).json({ message: "Specifications must be a JSON object or array." });
+    }
+
+    if (!actionTaker.includes(role)) {
         return res.status(403).json({ message: "Unauthorized! Only admins and super admins can add products." });
     }
 
     try {
-        const query = `INSERT INTO products (name, description, category, product_type, specification) VALUES ($1, $2, $3, $4, $5)`;
-        const values = [name, description, category, productType, specification];
+        const query = `INSERT INTO products (name, description, category, product_type, specifications) VALUES ($1, $2, $3, $4, $5) returning *`;
+        const values = [name, description, category, productType, parsedSpecifications];
         const result = await pool.query(query, values);
         return res.status(201).json({ message: "Product added successfully", result });
     }

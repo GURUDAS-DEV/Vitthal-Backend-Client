@@ -14,7 +14,7 @@ export const addVendorController = async (req: Request, res: Response): Promise<
 
     try {
         const result = await pool.query(
-            'INSERT INTO vendors (user_id, phone, gst_number, company_name) VALUES ($1, $2, $3, $4) RETURNING id, name, email, phone, address, gst_number',
+            'INSERT INTO vendors (user_id, phone, gst_number, company_name) VALUES ($1, $2, $3, $4) RETURNING id, phone,     gst_number',
             [userId, phone, gstNumber, companyName]
         );
         const vendor = result.rows[0];
@@ -124,7 +124,8 @@ export const createVendorAddress = async (req: Request, res: Response): Promise<
 }
 
 export const updateVendorAddress = async (req: Request, res: Response): Promise<Response> => {
-    const { userId, address, city, state, country, pincode, latitude, longitude } = req.body;
+    const { address, city, state, country, pincode, latitude, longitude } = req.body;
+    const { userId } = (req as any).user;
     if (!userId || !address || !city || !state || !country || !pincode || !latitude || !longitude) {
         return res.status(400).json({ message: "All fields are required!" });
     }
@@ -177,5 +178,53 @@ export const updateVendorAddress = async (req: Request, res: Response): Promise<
     catch (e) {
         console.log("Error occurred while updating vendor address: ", e);
         return res.status(500).json({ message: "Error occurred while updating vendor address!" });
+    }
+}
+
+export const getVendorDetailsController = async (req: Request, res: Response): Promise<Response> => {
+    const { userId, role } = (req as any).user;
+    if (!userId) {
+        return res.status(400).json({ message: "User ID is required!" });
+    }
+
+    if(role !== 'vendor') {
+        return res.status(403).json({ message: "Unauthorized! Only vendors can access their details!" });
+    }
+
+    try{
+        const query = `
+            SELECT 
+                u.id as user_id,
+                u.name as user_name,
+                u.email as user_email,
+                u.is_active as user_is_active,
+                v.phone as vendor_phone,
+                a.address as vendor_address,
+                a.city as vendor_city,
+                a.state as vendor_state,
+                a.country as vendor_country,
+                a.pincode as vendor_pincode,
+                a.latitude as vendor_latitude,
+                a.longitude as vendor_longitude
+            FROM users u
+            LEFT JOIN vendors v ON u.id = v.user_id
+            LEFT JOIN addresses a ON u.id = a.user_id
+            WHERE u.id = $1 AND u.role = 'vendor'
+        `;
+
+        const result = await pool.query(query, [userId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Vendor not found." });
+        }
+
+        return res.status(200).json({ 
+            message: "Vendor details fetched successfully",
+            data: result.rows[0]
+        });
+    }
+    catch (e) {
+        console.error("Error : ", e);
+        return res.status(500).json({ message: 'internal server error' });
     }
 }

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { addVendorController, createVendorAddress, updateVendorAddress, updateVendorBasicDetailsController } from "../Controllers/Vendors.Controller";
+import { addVendorController, createVendorAddress, getVendorDetailsController, updateVendorAddress, updateVendorBasicDetailsController } from "../Controllers/Vendors.Controller";
 import { authMiddleware } from "../Middleware/AuthMiddleware";
 
 
@@ -11,5 +11,7 @@ VendorsRouter.post("/createVendor", addVendorController);
 VendorsRouter.put("/updateVendorBasicDetails", updateVendorBasicDetailsController);
 VendorsRouter.post("/createVendorAddress", createVendorAddress);
 VendorsRouter.put("/updateVendorAddress", updateVendorAddress);
+
+VendorsRouter.get("/getVendorDetails", getVendorDetailsController);
 
 export default VendorsRouter;
