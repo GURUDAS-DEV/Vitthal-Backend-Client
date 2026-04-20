@@ -93,11 +93,12 @@ export const updateProduct = async (req: Request, res: Response): Promise<Respon
 
 export const getAllProducts = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const { offset } = req.query;
+        const { offset, limit } = req.query;
         if (!offset || isNaN(Number(offset))) {
             return res.status(400).json({ message: "Invalid offset value" });
         }
-        const offsetValue = Number(offset) * 20; // Assuming 20 products per page
+        const limitValue = Number(limit) > 20 ? 20 : Number(limit) || 20;
+        const offsetValue = Number(offset) * limitValue;
         const query = `
             SELECT 
                 p.id AS product_id,
@@ -120,7 +121,7 @@ export const getAllProducts = async (req: Request, res: Response): Promise<Respo
             ) p
 
             -- Primary image (no duplication)
-            LEFT JOIN product_images pImg 
+            LEFT JOIN products_images pImg 
                 ON p.id = pImg.product_id 
                 AND pImg.is_primary = true
 
@@ -185,7 +186,7 @@ export const getProductById = async (req: Request, res: Response): Promise<Respo
                 ) AS vendors
 
             FROM products p
-            LEFT JOIN product_images pImg ON p.id = pImg.product_id
+            LEFT JOIN products_images pImg ON p.id = pImg.product_id
             LEFT JOIN vendor_products vp ON p.id = vp.product_id
             LEFT JOIN vendors v ON vp.vendor_id = v.id
 
@@ -208,8 +209,8 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
     const { category } = req.params;
     const { offset } = req.query;
 
-    try{
-        if(!category || typeof category !== "string" || !validCategories.includes(category))
+    try {
+        if (!category || typeof category !== "string" || !validCategories.includes(category))
             return res.status(400).json({ message: "Invalid category! Category should be either plastic, metal or steel!" });
 
         if (!offset || isNaN(Number(offset)))
@@ -252,7 +253,7 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
         const result = await pool.query(query, [category, Number(offset) * 20]);
         return res.status(200).json({ message: "Products fetched successfully", data: result.rows });
     }
-    catch(e){
+    catch (e) {
         console.log("Error while fetching Product by category : ", e);
         return res.status(500).json({ message: "Internal Server Error" });
     }
@@ -261,12 +262,12 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
 export const getProductByName = async (req: Request, res: Response): Promise<Response> => {
     const { name } = req.query;
     const { offset } = req.query;
-    
+
     if (!name || typeof name !== "string") {
         return res.status(400).json({ message: "Product name is required and should be a string" });
     }
 
-    try{
+    try {
         //fuzzy search using ILIKE for case-insensitive partial matching
         const query = `
             SELECT 
