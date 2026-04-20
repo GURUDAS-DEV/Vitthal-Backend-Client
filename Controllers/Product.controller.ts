@@ -117,7 +117,7 @@ export const getAllProducts = async (req: Request, res: Response): Promise<Respo
             FROM (
                 SELECT id, name, description, category, product_type, specifications
                 FROM products
-                LIMIT 20 OFFSET $1
+                LIMIT $2 OFFSET $1
             ) p
 
             -- Primary image (no duplication)
@@ -134,7 +134,7 @@ export const getAllProducts = async (req: Request, res: Response): Promise<Respo
             ON p.id = vc.product_id;
         `;
 
-        const result = await pool.query(query, [offsetValue]);
+        const result = await pool.query(query, [offsetValue, limitValue]);
         return res.status(200).json({ message: "Products fetched successfully", data: result.rows });
     }
     catch (e) {
@@ -207,7 +207,9 @@ export const getProductById = async (req: Request, res: Response): Promise<Respo
 export const getProductsByCategory = async (req: Request, res: Response): Promise<Response> => {
     const validCategories = ['plastic', 'metal', 'steel'];
     const { category } = req.params;
-    const { offset } = req.query;
+    const { offset, limit } = req.query;
+    const limitValue = Number(limit) > 20 ? 20 : Number(limit) || 20;
+    const offsetValue = Number(offset) * limitValue;
 
     try {
         if (!category || typeof category !== "string" || !validCategories.includes(category))
@@ -234,11 +236,11 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
                 SELECT id, name, description, category, product_type
                 FROM products
                 WHERE category = $1
-                LIMIT 20 OFFSET $2
+                LIMIT $3 OFFSET $2
             ) p
 
             -- Primary image (no duplication)
-            LEFT JOIN product_images pImg 
+            LEFT JOIN products_images pImg 
                 ON p.id = pImg.product_id 
                 AND pImg.is_primary = true
 
@@ -250,7 +252,7 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
             ) vc ON true;
         `;
 
-        const result = await pool.query(query, [category, Number(offset) * 20]);
+        const result = await pool.query(query, [category, offsetValue, limitValue]);
         return res.status(200).json({ message: "Products fetched successfully", data: result.rows });
     }
     catch (e) {
@@ -261,7 +263,9 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
 
 export const getProductByName = async (req: Request, res: Response): Promise<Response> => {
     const { name } = req.query;
-    const { offset } = req.query;
+    const { offset, limit } = req.query;
+    const limitValue = Number(limit) > 20 ? 20 : Number(limit) || 20;
+    const offsetValue = Number(offset) * limitValue;
 
     if (!name || typeof name !== "string") {
         return res.status(400).json({ message: "Product name is required and should be a string" });
@@ -298,7 +302,7 @@ export const getProductByName = async (req: Request, res: Response): Promise<Res
                 WHERE vp.product_id = p.id
             ) vc ON true;
         `;
-        const result = await pool.query(query, [`%${name}%`, Number(offset) * 20]);
+        const result = await pool.query(query, [`%${name}%`, offsetValue]);
         return res.status(200).json({ message: "Product fetched successfully", data: result.rows });
     }
     catch (e) {
