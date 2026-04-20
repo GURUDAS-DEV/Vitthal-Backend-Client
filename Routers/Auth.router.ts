@@ -3,6 +3,7 @@ import { loginUser, logoutUser, registerUser } from "../Controllers/Auth.control
 
 const AuthRouter = Router();
 
+// Register, Login, Logout routes
 AuthRouter.post("/register", registerUser);
 AuthRouter.post("/login", loginUser);
 AuthRouter.post("/logout", logoutUser);
