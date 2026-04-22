@@ -138,7 +138,6 @@ export const getAllProducts = async (req: Request, res: Response): Promise<Respo
         const result = await pool.query(query, [offsetValue, limitValue]);
         const countResult = await pool.query('SELECT COUNT(*)::int AS total_count FROM products');
         const totalCount = countResult.rows[0].total_count;
-        console.log(`[getAllProducts] offset=${offsetValue}, limit=${limitValue}, totalCount=${totalCount}, returnedRows=${result.rows.length}`);
         return res.status(200).json({ message: "Products fetched successfully", totalCount, data: result.rows });
     }
     catch (e) {
@@ -260,7 +259,6 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
         const result = await pool.query(query, [category, offsetValue, limitValue]);
         const countResult = await pool.query('SELECT COUNT(*)::int AS total_count FROM products WHERE category = $1', [category]);
         const totalCount = countResult.rows[0].total_count;
-        console.log(`[getProductsByCategory] category=${category}, offset=${offsetValue}, limit=${limitValue}, totalCount=${totalCount}, returnedRows=${result.rows.length}`);
         return res.status(200).json({ message: "Products fetched successfully", totalCount, data: result.rows });
     }
     catch (e) {
