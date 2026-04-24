@@ -51,7 +51,7 @@ export const deleteProduct = async (req: Request, res: Response): Promise<Respon
         return res.status(400).json({ message: "Product ID is required" });
     }
 
-    if (role !== "admin" || role !== "super_admin") {
+    if (!actionTaker.includes(role)) {
         return res.status(403).json({ message: "Unauthorized! Only admins and super admins can delete products." });
     }
 
@@ -75,7 +75,7 @@ export const updateProduct = async (req: Request, res: Response): Promise<Respon
         return res.status(400).json({ message: "Product ID is required" });
     }
 
-    if (role !== "admin" || role !== "super_admin") {
+    if (!actionTaker.includes(role)) {
         return res.status(403).json({ message: "Unauthorized! Only admins and super admins can update products." });
     }
 

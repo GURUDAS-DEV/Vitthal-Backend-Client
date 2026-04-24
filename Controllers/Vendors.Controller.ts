@@ -18,7 +18,10 @@ export const addVendorController = async (req: Request, res: Response): Promise<
             [userId, phone, gstNumber, companyName]
         );
         const vendor = result.rows[0];
-        return res.status(201).json({ message: "Vendor added successfully!", vendor });
+        return res.status(201).json({
+            message: "Vendor profile created successfully! Your account is pending admin approval. You will be able to list products once approved.",
+            vendor,
+        });
     }
     catch (e) {
         console.error("Error occurred while adding vendor: ", e);
@@ -228,3 +231,183 @@ export const getVendorDetailsController = async (req: Request, res: Response): P
         return res.status(500).json({ message: 'internal server error' });
     }
 }
+
+// ─── Vendor Product Listings ───────────────────────────────────────────────────
+
+export const addVendorProduct = async (req: Request, res: Response): Promise<Response> => {
+    const { productId, price, moq, stockQuantity, commissionPercentage } = req.body;
+    const { userId, role } = (req as any).user;
+
+    if (role !== 'vendor') {
+        return res.status(403).json({ message: "Unauthorized! Only vendors can list products." });
+    }
+    if (!productId || price === undefined || !moq || stockQuantity === undefined) {
+        return res.status(400).json({ message: "productId, price, moq, and stockQuantity are required." });
+    }
+    if (Number(price) < 0 || Number(moq) <= 0 || Number(stockQuantity) < 0) {
+        return res.status(400).json({ message: "price must be >= 0, moq must be > 0, stockQuantity must be >= 0." });
+    }
+
+    try {
+        // Gate: vendor must be approved and not blocked
+        const vendorCheck = await pool.query(
+            `SELECT id, is_blocked, approval_status FROM vendors WHERE user_id = $1`,
+            [userId]
+        );
+
+        if (vendorCheck.rows.length === 0) {
+            return res.status(404).json({ message: "Vendor profile not found. Please complete your profile first." });
+        }
+
+        const vendor = vendorCheck.rows[0];
+
+        if (vendor.approval_status === 'pending') {
+            return res.status(403).json({ message: "Your vendor account is pending admin approval. You cannot list products yet." });
+        }
+        if (vendor.approval_status === 'rejected') {
+            return res.status(403).json({ message: "Your vendor account has been rejected. Please contact admin." });
+        }
+        if (vendor.is_blocked) {
+            return res.status(403).json({ message: "Your vendor account is blocked. Please contact admin." });
+        }
+
+        // Validate the product exists in the catalog
+        const productCheck = await pool.query(`SELECT id FROM products WHERE id = $1`, [productId]);
+        if (productCheck.rows.length === 0) {
+            return res.status(404).json({ message: "Product not found in catalog." });
+        }
+
+        const result = await pool.query(`
+            INSERT INTO vendor_products
+                (product_id, vendor_id, price, moq, stock_quantity, commision_percentage)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
+        `, [productId, vendor.id, price, moq, stockQuantity, commissionPercentage ?? 0]);
+
+        return res.status(201).json({ message: "Product listed successfully.", data: result.rows[0] });
+    } catch (e: any) {
+        if (e.code === '23505') {
+            return res.status(409).json({ message: "You have already listed this product. Update it instead." });
+        }
+        console.error("Error adding vendor product:", e);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export const updateVendorProduct = async (req: Request, res: Response): Promise<Response> => {
+    const { vpId } = req.params;
+    const { price, moq, stockQuantity, isActive } = req.body;
+    const { userId, role } = (req as any).user;
+
+    if (role !== 'vendor') {
+        return res.status(403).json({ message: "Unauthorized! Only vendors can update their listings." });
+    }
+    if (!vpId) {
+        return res.status(400).json({ message: "Vendor product ID is required." });
+    }
+
+    try {
+        // Ownership check — listing must belong to this vendor
+        const ownerCheck = await pool.query(`
+            SELECT vp.id
+            FROM   vendor_products vp
+            JOIN   vendors v ON vp.vendor_id = v.id
+            WHERE  vp.id = $1 AND v.user_id = $2
+        `, [vpId, userId]);
+
+        if (ownerCheck.rows.length === 0) {
+            return res.status(404).json({ message: "Product listing not found or you don't have permission." });
+        }
+
+        const result = await pool.query(`
+            UPDATE vendor_products
+            SET
+                price          = COALESCE($1, price),
+                moq            = COALESCE($2, moq),
+                stock_quantity = COALESCE($3, stock_quantity),
+                is_active      = COALESCE($4, is_active),
+                updated_at     = NOW()
+            WHERE id = $5
+            RETURNING *
+        `, [
+            price        !== undefined ? price        : null,
+            moq          !== undefined ? moq          : null,
+            stockQuantity !== undefined ? stockQuantity : null,
+            isActive     !== undefined ? isActive     : null,
+            vpId,
+        ]);
+
+        return res.status(200).json({ message: "Product listing updated.", data: result.rows[0] });
+    } catch (e) {
+        console.error("Error updating vendor product:", e);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export const removeVendorProduct = async (req: Request, res: Response): Promise<Response> => {
+    const { vpId } = req.params;
+    const { userId, role } = (req as any).user;
+
+    if (role !== 'vendor') {
+        return res.status(403).json({ message: "Unauthorized! Only vendors can remove their listings." });
+    }
+
+    try {
+        const result = await pool.query(`
+            DELETE FROM vendor_products
+            WHERE id        = $1
+              AND vendor_id = (SELECT id FROM vendors WHERE user_id = $2)
+            RETURNING id
+        `, [vpId, userId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Product listing not found or you don't have permission." });
+        }
+
+        return res.status(200).json({ message: "Product listing removed successfully." });
+    } catch (e) {
+        console.error("Error removing vendor product:", e);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export const getMyVendorProducts = async (req: Request, res: Response): Promise<Response> => {
+    const { userId, role } = (req as any).user;
+    const { offset = '0' } = req.query;
+
+    if (role !== 'vendor') {
+        return res.status(403).json({ message: "Unauthorized! Only vendors can view their listings." });
+    }
+
+    try {
+        const result = await pool.query(`
+            SELECT
+                vp.id                  AS vendor_product_id,
+                vp.price,
+                vp.moq,
+                vp.stock_quantity,
+                vp.commision_percentage,
+                vp.is_active,
+                vp.created_at,
+                p.id                   AS product_id,
+                p.name                 AS product_name,
+                p.description,
+                p.category,
+                p.product_type,
+                pi.image_url           AS primary_image
+            FROM  vendor_products vp
+            JOIN  vendors         v  ON vp.vendor_id  = v.id
+            JOIN  products        p  ON vp.product_id = p.id
+            LEFT  JOIN products_images pi
+                  ON p.id = pi.product_id AND pi.is_primary = true
+            WHERE v.user_id = $1
+            ORDER BY vp.created_at DESC
+            LIMIT 20 OFFSET $2
+        `, [userId, Number(offset) * 20]);
+
+        return res.status(200).json({ message: "Your product listings fetched.", data: result.rows });
+    } catch (e) {
+        console.error("Error fetching vendor products:", e);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+};
