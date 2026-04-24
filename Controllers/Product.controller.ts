@@ -93,11 +93,12 @@ export const updateProduct = async (req: Request, res: Response): Promise<Respon
 
 export const getAllProducts = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const { offset } = req.query;
-        if (!offset || isNaN(Number(offset))) {
+        const { offset, limit } = req.query;
+        if (offset === undefined || offset === null || isNaN(Number(offset))) {
             return res.status(400).json({ message: "Invalid offset value" });
         }
-        const offsetValue = Number(offset) * 20; // Assuming 20 products per page
+        const limitValue = Number(limit) > 20 ? 20 : Number(limit) || 20;
+        const offsetValue = Number(offset) * limitValue;
         const query = `
             SELECT 
                 p.id AS product_id,
@@ -116,11 +117,12 @@ export const getAllProducts = async (req: Request, res: Response): Promise<Respo
             FROM (
                 SELECT id, name, description, category, product_type, specifications
                 FROM products
-                LIMIT 20 OFFSET $1
+                ORDER BY created_at DESC, id ASC
+                LIMIT $2 OFFSET $1
             ) p
 
             -- Primary image (no duplication)
-            LEFT JOIN product_images pImg 
+            LEFT JOIN products_images pImg 
                 ON p.id = pImg.product_id 
                 AND pImg.is_primary = true
 
@@ -133,8 +135,10 @@ export const getAllProducts = async (req: Request, res: Response): Promise<Respo
             ON p.id = vc.product_id;
         `;
 
-        const result = await pool.query(query, [offsetValue]);
-        return res.status(200).json({ message: "Products fetched successfully", data: result.rows });
+        const result = await pool.query(query, [offsetValue, limitValue]);
+        const countResult = await pool.query('SELECT COUNT(*)::int AS total_count FROM products');
+        const totalCount = countResult.rows[0].total_count;
+        return res.status(200).json({ message: "Products fetched successfully", totalCount, data: result.rows });
     }
     catch (e) {
         console.log("Error while fetching Products : ", e);
@@ -169,13 +173,12 @@ export const getProductById = async (req: Request, res: Response): Promise<Respo
                         ORDER BY pImg.display_order
                     ) FILTER (WHERE pImg.id IS NOT NULL),
                     '[]'
-                ) AS images
+                ) AS images,
 
                 -- Vendors array
                 COALESCE(
                     JSON_AGG(DISTINCT JSONB_BUILD_OBJECT(
                         'vendor_id', v.id,
-                        'vendor_name', v.name,
                         'company_name', v.company_name,
                         'price', vp.price,
                         'moq', vp.moq,
@@ -185,9 +188,10 @@ export const getProductById = async (req: Request, res: Response): Promise<Respo
                 ) AS vendors
 
             FROM products p
-            LEFT JOIN product_images pImg ON p.id = pImg.product_id
+            LEFT JOIN products_images pImg ON p.id = pImg.product_id
             LEFT JOIN vendor_products vp ON p.id = vp.product_id
             LEFT JOIN vendors v ON vp.vendor_id = v.id
+            LEFT JOIN users u ON v.user_id = u.id
 
             WHERE p.id = $1
 
@@ -206,13 +210,15 @@ export const getProductById = async (req: Request, res: Response): Promise<Respo
 export const getProductsByCategory = async (req: Request, res: Response): Promise<Response> => {
     const validCategories = ['plastic', 'metal', 'steel'];
     const { category } = req.params;
-    const { offset } = req.query;
+    const { offset, limit } = req.query;
+    const limitValue = Number(limit) > 20 ? 20 : Number(limit) || 20;
+    const offsetValue = Number(offset) * limitValue;
 
-    try{
-        if(!category || typeof category !== "string" || !validCategories.includes(category))
+    try {
+        if (!category || typeof category !== "string" || !validCategories.includes(category))
             return res.status(400).json({ message: "Invalid category! Category should be either plastic, metal or steel!" });
 
-        if (!offset || isNaN(Number(offset)))
+        if (offset === undefined || offset === null || isNaN(Number(offset)))
             return res.status(400).json({ message: "Invalid offset value" });
 
         const query = `
@@ -233,11 +239,12 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
                 SELECT id, name, description, category, product_type
                 FROM products
                 WHERE category = $1
-                LIMIT 20 OFFSET $2
+                ORDER BY created_at DESC, id ASC
+                LIMIT $3 OFFSET $2
             ) p
 
             -- Primary image (no duplication)
-            LEFT JOIN product_images pImg 
+            LEFT JOIN products_images pImg 
                 ON p.id = pImg.product_id 
                 AND pImg.is_primary = true
 
@@ -249,10 +256,12 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
             ) vc ON true;
         `;
 
-        const result = await pool.query(query, [category, Number(offset) * 20]);
-        return res.status(200).json({ message: "Products fetched successfully", data: result.rows });
+        const result = await pool.query(query, [category, offsetValue, limitValue]);
+        const countResult = await pool.query('SELECT COUNT(*)::int AS total_count FROM products WHERE category = $1', [category]);
+        const totalCount = countResult.rows[0].total_count;
+        return res.status(200).json({ message: "Products fetched successfully", totalCount, data: result.rows });
     }
-    catch(e){
+    catch (e) {
         console.log("Error while fetching Product by category : ", e);
         return res.status(500).json({ message: "Internal Server Error" });
     }
@@ -260,13 +269,20 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
 
 export const getProductByName = async (req: Request, res: Response): Promise<Response> => {
     const { name } = req.query;
-    const { offset } = req.query;
-    
+    const { offset, limit } = req.query;
+
     if (!name || typeof name !== "string") {
         return res.status(400).json({ message: "Product name is required and should be a string" });
     }
 
-    try{
+    if (offset === undefined || offset === null || isNaN(Number(offset))) {
+        return res.status(400).json({ message: "Invalid offset value" });
+    }
+
+    const limitValue = Number(limit) > 20 ? 20 : Number(limit) || 20;
+    const offsetValue = Number(offset) * limitValue;
+
+    try {
         //fuzzy search using ILIKE for case-insensitive partial matching
         const query = `
             SELECT 
@@ -284,7 +300,8 @@ export const getProductByName = async (req: Request, res: Response): Promise<Res
                 SELECT id, name, description, category, product_type
                 FROM products
                 WHERE name ILIKE $1
-                LIMIT 20 OFFSET $2
+                ORDER BY created_at DESC, id ASC
+                LIMIT $3 OFFSET $2
             ) p
 
             LEFT JOIN product_images pImg 
@@ -297,8 +314,10 @@ export const getProductByName = async (req: Request, res: Response): Promise<Res
                 WHERE vp.product_id = p.id
             ) vc ON true;
         `;
-        const result = await pool.query(query, [`%${name}%`, Number(offset) * 20]);
-        return res.status(200).json({ message: "Product fetched successfully", data: result.rows });
+        const result = await pool.query(query, [`%${name}%`, offsetValue, limitValue]);
+        const countResult = await pool.query(`SELECT COUNT(*)::int AS total_count FROM products WHERE name ILIKE $1`, [`%${name}%`]);
+        const totalCount = countResult.rows[0].total_count;
+        return res.status(200).json({ message: "Product fetched successfully", totalCount, data: result.rows });
     }
     catch (e) {
         console.log("Error while fetching Product by name : ", e);
