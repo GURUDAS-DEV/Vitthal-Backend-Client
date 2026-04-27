@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { loginUser, logoutUser, registerUser } from "../Controllers/Auth.controller";
+import { loginUser, logoutUser, registerUser, getCurrentUser } from "../Controllers/Auth.controller";
+import { authMiddleware } from "../Middleware/AuthMiddleware";
 
 const AuthRouter = Router();
 
@@ -8,4 +9,7 @@ AuthRouter.post("/register", registerUser);
 AuthRouter.post("/login", loginUser);
 AuthRouter.post("/logout", logoutUser);
 
-export default AuthRouter;  
+// Protected route - get current user
+AuthRouter.get("/me", authMiddleware, getCurrentUser);
+
+export default AuthRouter;

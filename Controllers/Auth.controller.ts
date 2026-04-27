@@ -43,7 +43,7 @@ export async function registerUser(req: Request, res: Response): Promise<Respons
             maxAge: 30 * 60 * 1000, // 30 minutes
         });
 
-        return res.status(200).json({ message: 'User registered successfully' });
+        return res.status(200).json({ message: 'User registered successfully', user: { userId: user.id, username: user.name, email: user.email, role } });
     }
     catch (error) {
         const dbError = error as DatabaseError;
@@ -90,12 +90,20 @@ export async function loginUser(req: Request, res: Response): Promise<Response> 
             maxAge: 30 * 60 * 1000, // 30 minutes
         });
 
-        return res.status(200).json({ message: 'Login successful' });
+        return res.status(200).json({ message: 'Login successful', user: { userId: user.id, username: user.name, email: user.email, role: user.role } });
     }
     catch (error) {
         console.error('Error logging in user:', error);
         return res.status(500).json({ message: 'Internal server error' });
     }
+}
+
+export async function getCurrentUser(req: Request, res: Response): Promise<Response> {
+    const user = (req as any).user;
+    if (!user) {
+        return res.status(401).json({ message: 'Unauthorized' });
+    }
+    return res.status(200).json({ user: { userId: user.userId, username: user.username, email: user.email, role: user.role } });
 }
 
 export async function logoutUser(req: Request, res: Response): Promise<Response> {
