@@ -41,7 +41,10 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     role user_role NOT NULL DEFAULT 'client',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    OTP TEXT,
     refresh_token TEXT,
+    OTP_Expiry TIMESTAMPTZ,
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -177,6 +180,65 @@ CREATE TABLE fulfillment_centers(
 );
 
 -- ================================
+-- CART SYSTEM
+-- ================================
+
+--cart : 
+CREATE TABLE carts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    user_id UUID NOT NULL UNIQUE, -- ensures 1 cart per user (for now)
+
+    status TEXT NOT NULL DEFAULT 'active', 
+    -- future: active, converted, abandoned, saved
+
+    total_amount NUMERIC(12,2) DEFAULT 0, -- optional (can be computed)
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_carts_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE CASCADE
+);
+
+--cart_items : 
+CREATE TABLE cart_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    cart_id UUID NOT NULL,
+    product_id UUID NOT NULL,
+    vendor_id UUID NOT NULL,
+
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+
+    price_at_added NUMERIC(12,2) NOT NULL, -- snapshot price
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_cart_items_cart
+        FOREIGN KEY (cart_id)
+        REFERENCES carts(id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_cart_items_product
+        FOREIGN KEY (product_id)
+        REFERENCES products(id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_cart_items_vendor
+        FOREIGN KEY (vendor_id)
+        REFERENCES vendors(id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT unique_cart_product_vendor
+        UNIQUE (cart_id, product_id, vendor_id)
+);
+
+
+-- ================================
 -- INDEXES
 -- ================================
 
@@ -189,3 +251,7 @@ CREATE INDEX IF NOT EXISTS idx_fulfillment_centers_user_id ON fulfillment_center
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_vendors_rating ON vendors(rating DESC) WHERE is_active = TRUE;
 CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type);
+
+--cart indexes
+CREATE INDEX idx_cart_items_cart_id ON cart_items(cart_id);
+CREATE INDEX idx_cart_items_product_id ON cart_items(product_id);

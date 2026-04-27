@@ -5,30 +5,32 @@ import { COOKIE_OPTIONS } from "../shared/CokkieSetting.shared";
 export const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
     try {
         const { refreshToken, accessToken } = req.cookies;
-        if (!refreshToken)
+        if (!refreshToken){
             return res.status(401).json({ message: "Unauthorized" });
-
+        }
+        
         if (!accessToken) {
+            const decodedRefreshToken = verifyToken(refreshToken, "refresh");
             const newAccessToken = generateNewAccessToken(refreshToken);
             res.cookie("accessToken", newAccessToken, {
                 ...COOKIE_OPTIONS,
                 maxAge: 30 * 60 * 1000,
             });
-            const decodedRefreshToken = verifyToken(refreshToken, "refresh");
             (req as any).user = decodedRefreshToken;
             return next();
         }
-
+        
         const decodedAccessToken = verifyToken(accessToken, "access");
         const decodedRefreshToken = verifyToken(refreshToken, "refresh");
         if (decodedAccessToken.userId !== decodedRefreshToken.userId)
             return res.status(401).json({ message: "Refresh Token and Access Token are not issued for same user!!" });
-
+        
         const { userId, username, email, role } = decodedAccessToken;
         (req as any).user = { userId, username, email, role };
         next();
 
     } catch (error) {
+        console.log("Error verifying tokens:", error);
         return res.status(401).json({ message: "Unauthorized! Failed to verify Tokens." });
     }
 }

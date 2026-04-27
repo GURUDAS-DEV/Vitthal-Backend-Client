@@ -7,6 +7,7 @@ import AuthRouter from './Routers/Auth.router';
 import productRouter from './Routers/Product.router';
 import VendorsRouter from './Routers/Vendors.Router';
 import clientRouter from './Routers/ClientRouter';
+import CartRouter from './Routers/Cart.router';
 
 dotenv.config();
 
@@ -38,6 +39,7 @@ app.use("/api/auth", AuthRouter);
 app.use("/api/products", productRouter);
 app.use("/api/vendors", VendorsRouter);
 app.use("/api/client", clientRouter);
+app.use("/api/cart", CartRouter);
 
 // Start the server
 app.listen(PORT, () => {
