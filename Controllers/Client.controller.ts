@@ -3,7 +3,7 @@ import pool from "../DbConnect";
 
 
 export const addClientDetailsController = async (req: Request, res: Response): Promise<Response> => {
-    const { address, city, state, country, pincode, latitude, longitude, phone } = req.body;
+    const { address, city, state, country, pincode, latitude, longitude} = req.body;
     const authUser = (req as any).user;
 
     if (!authUser?.userId || !authUser?.role) {
@@ -12,7 +12,7 @@ export const addClientDetailsController = async (req: Request, res: Response): P
 
     const { userId, role } = authUser;
 
-    if (!userId || !address || !city || !state || !country || !pincode || latitude === undefined || longitude === undefined || !phone) {
+    if (!userId || !address || !city || !state || !country || !pincode || latitude === undefined || longitude === undefined) {
         return res.status(400).json({ message: "All fields are required!" });
     }
 
@@ -41,16 +41,7 @@ export const addClientDetailsController = async (req: Request, res: Response): P
         // Use a transaction since we are inserting into multiple tables
         await pool.query('BEGIN');
 
-        let newClient = null;
         let newAddress = null;
-
-        if (!client_id) {
-            const clientResult = await pool.query(
-                `INSERT INTO client (user_id, phone) VALUES ($1, $2) RETURNING *`,
-                [userId, phone]
-            );
-            newClient = clientResult.rows[0];
-        }
 
         if (!address_id) {
             const addressResult = await pool.query(
@@ -63,7 +54,7 @@ export const addClientDetailsController = async (req: Request, res: Response): P
 
         await pool.query('COMMIT');
 
-        return res.status(201).json({ message: "Client details added successfully!", client: newClient, address: newAddress });
+        return res.status(201).json({ message: "Client details added successfully!", address: newAddress });
     }
     catch (e) {
         await pool.query('ROLLBACK');
@@ -184,9 +175,6 @@ export const clientDetails = async (req: Request, res: Response): Promise<Respon
     if (!userId || !role)
         return res.status(400).json({ message: "Required all field" });
 
-    if (role !== 'client') {
-        return res.status(403).json({ message: "Unauthorized! Only clients can access their details." });
-    }
 
     try {
         const query = `

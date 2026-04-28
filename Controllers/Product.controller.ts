@@ -112,7 +112,12 @@ export const getAllProducts = async (req: Request, res: Response): Promise<Respo
                 pImg.image_url AS primary_image,
 
                 -- Seller count
-                COALESCE(vc.vendor_count, 0) AS seller_count
+                COALESCE(vc.vendor_count, 0) AS seller_count,
+
+                -- Price range
+                COALESCE(pr.min_price, 0) AS min_price,
+                COALESCE(pr.max_price, 0) AS max_price,
+                COALESCE(pr.min_moq, 1) AS min_moq
 
             FROM (
                 SELECT id, name, description, category, product_type, specifications
@@ -132,7 +137,20 @@ export const getAllProducts = async (req: Request, res: Response): Promise<Respo
                 FROM vendor_products
                 GROUP BY product_id
             ) vc 
-            ON p.id = vc.product_id;
+            ON p.id = vc.product_id
+
+            -- Price range from vendor_products
+            LEFT JOIN (
+                SELECT 
+                    product_id, 
+                    MIN(price) AS min_price, 
+                    MAX(price) AS max_price,
+                    MIN(moq) AS min_moq
+                FROM vendor_products
+                WHERE is_active = true
+                GROUP BY product_id
+            ) pr 
+            ON p.id = pr.product_id;
         `;
 
         const result = await pool.query(query, [offsetValue, limitValue]);
@@ -233,7 +251,12 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
                 pImg.image_url AS primary_image,
 
                 -- Vendor count (optimized)
-                COALESCE(vc.vendor_count, 0) AS vendor_count
+                COALESCE(vc.vendor_count, 0) AS vendor_count,
+
+                -- Price range
+                COALESCE(pr.min_price, 0) AS min_price,
+                COALESCE(pr.max_price, 0) AS max_price,
+                COALESCE(pr.min_moq, 1) AS min_moq
 
             FROM (
                 SELECT id, name, description, category, product_type
@@ -253,7 +276,17 @@ export const getProductsByCategory = async (req: Request, res: Response): Promis
                 SELECT COUNT(DISTINCT vendor_id) AS vendor_count
                 FROM vendor_products vp
                 WHERE vp.product_id = p.id
-            ) vc ON true;
+            ) vc ON true
+
+            -- Price range from vendor_products
+            LEFT JOIN LATERAL (
+                SELECT 
+                    MIN(price) AS min_price, 
+                    MAX(price) AS max_price,
+                    MIN(moq) AS min_moq
+                FROM vendor_products vp
+                WHERE vp.product_id = p.id AND vp.is_active = true
+            ) pr ON true;
         `;
 
         const result = await pool.query(query, [category, offsetValue, limitValue]);
