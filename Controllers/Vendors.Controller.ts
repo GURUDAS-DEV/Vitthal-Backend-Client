@@ -199,6 +199,8 @@ export const getVendorDetailsController = async (req: Request, res: Response): P
                 u.email as user_email,
                 u.is_active as user_is_active,
                 v.phone as vendor_phone,
+                v.company_name as vendor_company_name,
+                v.gst_number as vendor_gst_number,
                 a.address as vendor_address,
                 a.city as vendor_city,
                 a.state as vendor_state,
@@ -218,9 +220,52 @@ export const getVendorDetailsController = async (req: Request, res: Response): P
             return res.status(404).json({ message: "Vendor not found." });
         }
 
-        return res.status(200).json({ 
+        return res.status(200).json({
             message: "Vendor details fetched successfully",
             data: result.rows[0]
+        });
+    }
+    catch (e) {
+        console.error("Error : ", e);
+        return res.status(500).json({ message: 'internal server error' });
+    }
+}
+
+export const checkVendorSetupStatus = async (req: Request, res: Response): Promise<Response> => {
+    const { userId, role } = (req as any).user;
+    if (!userId) {
+        return res.status(400).json({ message: "User ID is required!" });
+    }
+
+    if(role !== 'vendor') {
+        return res.status(403).json({ message: "Unauthorized! Only vendors can access their details!" });
+    }
+
+    try{
+        const query = `
+            SELECT 
+                v.id as vendor_exists,
+                a.id as address_exists
+            FROM users u
+            LEFT JOIN vendors v ON u.id = v.user_id
+            LEFT JOIN addresses a ON u.id = a.user_id
+            WHERE u.id = $1 AND u.role = 'vendor'
+        `;
+
+        const result = await pool.query(query, [userId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Vendor not found." });
+        }
+
+        const row = result.rows[0];
+        const isSetupComplete = row.vendor_exists !== null && row.address_exists !== null;
+
+        return res.status(200).json({
+            message: "Setup status fetched successfully",
+            isSetupComplete,
+            hasVendorProfile: row.vendor_exists !== null,
+            hasAddress: row.address_exists !== null
         });
     }
     catch (e) {
