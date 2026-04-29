@@ -1,18 +1,21 @@
 import { Router } from "express";
 
 import { addVendorController, createVendorAddress, getVendorDetailsController, updateVendorAddress, updateVendorBasicDetailsController, checkVendorSetupStatus } from "../Controllers/Vendors.Controller";
+import { getVendorDashboardController, getVendorAnalyticsController } from "../Controllers/VendorDashboard.Controller";
 
 import { authMiddleware } from "../Middleware/AuthMiddleware";
 
-const VendorsRouter = Router();
-VendorsRouter.use(authMiddleware);
+const vendorsRouter = Router();
+vendorsRouter.use(authMiddleware);
 
-VendorsRouter.post("/createVendor", addVendorController);
-VendorsRouter.put("/updateVendorBasicDetails", updateVendorBasicDetailsController);
-VendorsRouter.post("/createVendorAddress", createVendorAddress);
-VendorsRouter.put("/updateVendorAddress", updateVendorAddress);
+vendorsRouter.post("/createVendor", addVendorController);
+vendorsRouter.put("/updateVendorBasicDetails", updateVendorBasicDetailsController);
+vendorsRouter.post("/createVendorAddress", createVendorAddress);
+vendorsRouter.put("/updateVendorAddress", updateVendorAddress);
 
-VendorsRouter.get("/getVendorDetails", getVendorDetailsController);
-VendorsRouter.get("/checkSetupStatus", checkVendorSetupStatus);
+vendorsRouter.get("/getVendorDetails", getVendorDetailsController);
+vendorsRouter.get("/checkSetupStatus", checkVendorSetupStatus);
+vendorsRouter.get("/dashboard", getVendorDashboardController);
+vendorsRouter.get("/analytics", getVendorAnalyticsController);
 
-export default VendorsRouter;
+export default vendorsRouter;

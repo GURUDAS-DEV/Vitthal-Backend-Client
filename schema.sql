@@ -237,6 +237,70 @@ CREATE TABLE cart_items (
         UNIQUE (cart_id, product_id, vendor_id)
 );
 
+-- ================================
+-- ORDERS
+-- ================================
+CREATE TABLE orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    user_id UUID NOT NULL,
+    vendor_id UUID NOT NULL,
+
+    cart_id UUID, -- reference to original cart (optional but useful)
+
+    status TEXT NOT NULL DEFAULT 'pending',
+    -- pending, confirmed, shipped, delivered, cancelled
+
+    payment_status TEXT DEFAULT 'pending',
+    -- pending, paid, failed
+
+    total_amount NUMERIC(12,2) NOT NULL,
+
+    -- 🔥 for storing address(not storing address refrence but storing address directly, because if refrence is stored them deletion of address by user become impossible)
+    address_line TEXT NOT NULL,
+    city TEXT NOT NULL,
+    state TEXT NOT NULL,
+    country TEXT NOT NULL,
+    pincode VARCHAR(6) NOT NULL,
+    latitude TEXT NOT NULL,
+    langitude TEXT NOT NULL,
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+    CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_orders_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id),
+    CONSTRAINT fk_orders_cart FOREIGN KEY (cart_id) REFERENCES carts(id)
+);
+
+-- cart_items : 
+CREATE TABLE order_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    order_id UUID NOT NULL,
+
+    product_id UUID NOT NULL,  -- keep FK (since we are not deleting products)
+    vendor_id UUID NOT NULL,
+
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+
+    price NUMERIC(12,2) NOT NULL, -- 🔥 final locked price at checkout
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    CONSTRAINT fk_order_items_order 
+        FOREIGN KEY (order_id) 
+        REFERENCES orders(id) 
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_order_items_product 
+        FOREIGN KEY (product_id) 
+        REFERENCES products(id),
+
+    CONSTRAINT fk_order_items_vendor 
+        FOREIGN KEY (vendor_id) 
+        REFERENCES vendors(id)
+);
 
 -- ================================
 -- INDEXES
@@ -253,5 +317,9 @@ CREATE INDEX IF NOT EXISTS idx_vendors_rating ON vendors(rating DESC) WHERE is_a
 CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type);
 
 --cart indexes
-CREATE INDEX idx_cart_items_cart_id ON cart_items(cart_id);
-CREATE INDEX idx_cart_items_product_id ON cart_items(product_id);
+CREATE INDEX IF NOT EXISTS idx_cart_items_cart_id ON cart_items(cart_id);
+CREATE INDEX IF NOT EXISTS idx_cart_items_product_id ON cart_items(product_id);
+
+--order indexs : 
+CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);

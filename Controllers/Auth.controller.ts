@@ -400,3 +400,35 @@ export const resetPasswordController = async (req: Request, res: Response) => {
         return res.status(500).json({ message: "Internal Server Error" });
     }
 }
+
+export const updateUserNameController = async (req: Request, res: Response): Promise<Response> => {
+    const user = (req as any).user;
+    if (!user) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { name } = req.body;
+    if (!name || typeof name !== "string" || name.trim() === "") {
+        return res.status(400).json({ message: "Name is required" });
+    }
+
+    try {
+        const result = await pool.query(
+            "UPDATE users SET name = $1, updated_at = NOW() WHERE id = $2 RETURNING id, name, email, role",
+            [name.trim(), user.userId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        const updatedUser = result.rows[0];
+        return res.status(200).json({
+            message: "User name updated successfully",
+            user: { userId: updatedUser.id, username: updatedUser.name, email: updatedUser.email, role: updatedUser.role }
+        });
+    } catch (e) {
+        console.error("Error updating user name:", e);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}

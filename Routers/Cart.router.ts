@@ -8,12 +8,12 @@ import {
     clearCartController
 } from "../Controllers/Cart.Controller";
 
-const CartRouter = Router();
+const cartRouter = Router();
 
-CartRouter.get("/", authMiddleware, getCartDataController);
-CartRouter.post("/", authMiddleware, addCartItemController);
-CartRouter.patch("/item", authMiddleware, updateCartItemController);
-CartRouter.delete("/item", authMiddleware, removeCartItemController);
-CartRouter.delete("/", authMiddleware, clearCartController);
+cartRouter.get("/", authMiddleware, getCartDataController);
+cartRouter.post("/", authMiddleware, addCartItemController);
+cartRouter.patch("/item", authMiddleware, updateCartItemController);
+cartRouter.delete("/item", authMiddleware, removeCartItemController);
+cartRouter.delete("/", authMiddleware, clearCartController);
 
-export default CartRouter;
+export default cartRouter;

@@ -1,0 +1,385 @@
+import type { Request, Response } from "express";
+import pool from "../DbConnect";
+
+export const getVendorDashboardController = async (req: Request, res: Response): Promise<Response> => {
+    const { userId, role } = (req as any).user;
+    if (!userId) {
+        return res.status(400).json({ message: "User ID is required!" });
+    }
+
+    if (role !== 'vendor') {
+        return res.status(403).json({ message: "Unauthorized! Only vendors can access dashboard!" });
+    }
+
+    try {
+        // Get vendor id from user_id
+        const vendorResult = await pool.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
+        if (vendorResult.rows.length === 0) {
+            return res.status(404).json({ message: "Vendor not found. Please setup your profile first." });
+        }
+        const vendorId = vendorResult.rows[0].id;
+
+        // 1. Stats
+        const statsQuery = `
+            SELECT
+                COALESCE(SUM(o.total_amount), 0) AS total_revenue,
+                COUNT(o.id) AS total_orders,
+                (SELECT COUNT(*) FROM vendor_products vp WHERE vp.vendor_id = $1 AND vp.is_active = true) AS active_products,
+                (SELECT COUNT(DISTINCT o2.user_id) FROM orders o2 WHERE o2.vendor_id = $1) AS total_customers
+            FROM orders o
+            WHERE o.vendor_id = $1
+        `;
+        const statsResult = await pool.query(statsQuery, [vendorId]);
+        const stats = statsResult.rows[0];
+
+        // 2. Revenue chart - last 7 days
+        const revenueChartQuery = `
+            SELECT
+                DATE(o.created_at)::text AS day_date,
+                COALESCE(SUM(o.total_amount), 0) AS revenue
+            FROM orders o
+            WHERE o.vendor_id = $1
+                AND o.created_at >= NOW() - INTERVAL '6 days'
+            GROUP BY DATE(o.created_at)
+            ORDER BY DATE(o.created_at) ASC
+        `;
+        const revenueChartResult = await pool.query(revenueChartQuery, [vendorId]);
+
+        // Build chart data for last 7 days (fill missing days with 0)
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const chartLabels: string[] = [];
+        const chartData: number[] = [];
+        const revenueMap = new Map<string, number>();
+
+        for (const row of revenueChartResult.rows) {
+            revenueMap.set(row.day_date, parseFloat(row.revenue));
+        }
+
+        for (let i = 6; i >= 0; i--) {
+            const date = new Date();
+            date.setDate(date.getDate() - i);
+            const dateStr = date.toISOString().split('T')[0];
+            const dayName = dayNames[date.getDay()];
+            chartLabels.push(dayName);
+            chartData.push(revenueMap.get(dateStr) || 0);
+        }
+
+        // 3. Recent orders (last 5)
+        const recentOrdersQuery = `
+            SELECT
+                o.id AS order_id,
+                o.status,
+                o.total_amount,
+                o.created_at,
+                u.name AS customer_name,
+                (
+                    SELECT p.name
+                    FROM order_items oi
+                    JOIN products p ON oi.product_id = p.id
+                    WHERE oi.order_id = o.id
+                    LIMIT 1
+                ) AS product_name
+            FROM orders o
+            JOIN users u ON o.user_id = u.id
+            WHERE o.vendor_id = $1
+            ORDER BY o.created_at DESC
+            LIMIT 5
+        `;
+        const recentOrdersResult = await pool.query(recentOrdersQuery, [vendorId]);
+
+        // 4. Top products (by total quantity sold)
+        const topProductsQuery = `
+            SELECT
+                p.name AS product_name,
+                SUM(oi.quantity) AS total_sales,
+                SUM(oi.quantity * oi.price) AS total_revenue
+            FROM order_items oi
+            JOIN products p ON oi.product_id = p.id
+            WHERE oi.vendor_id = $1
+            GROUP BY p.name
+            ORDER BY total_sales DESC
+            LIMIT 3
+        `;
+        const topProductsResult = await pool.query(topProductsQuery, [vendorId]);
+
+        return res.status(200).json({
+            message: "Dashboard data fetched successfully",
+            data: {
+                stats: {
+                    totalRevenue: parseFloat(stats.total_revenue) || 0,
+                    totalOrders: parseInt(stats.total_orders) || 0,
+                    activeProducts: parseInt(stats.active_products) || 0,
+                    totalCustomers: parseInt(stats.total_customers) || 0,
+                },
+                revenueChart: {
+                    labels: chartLabels,
+                    data: chartData,
+                },
+                recentOrders: recentOrdersResult.rows.map((row: any) => ({
+                    orderId: row.order_id,
+                    customerName: row.customer_name,
+                    productName: row.product_name || 'N/A',
+                    date: row.created_at,
+                    amount: parseFloat(row.total_amount) || 0,
+                    status: row.status,
+                })),
+                topProducts: topProductsResult.rows.map((row: any) => ({
+                    name: row.product_name,
+                    sales: parseInt(row.total_sales) || 0,
+                    revenue: parseFloat(row.total_revenue) || 0,
+                })),
+            }
+        });
+    } catch (e) {
+        console.error("Error fetching vendor dashboard:", e);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export const getVendorAnalyticsController = async (req: Request, res: Response): Promise<Response> => {
+    const { userId, role } = (req as any).user;
+    if (!userId) {
+        return res.status(400).json({ message: "User ID is required!" });
+    }
+
+    if (role !== 'vendor') {
+        return res.status(403).json({ message: "Unauthorized! Only vendors can access analytics!" });
+    }
+
+    // Get timeframe from query params (default: 'year')
+    const timeframe = (req.query.timeframe as string) || 'year';
+
+    try {
+        // Get vendor id from user_id
+        const vendorResult = await pool.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
+        if (vendorResult.rows.length === 0) {
+            return res.status(404).json({ message: "Vendor not found. Please setup your profile first." });
+        }
+        const vendorId = vendorResult.rows[0].id;
+
+        // Determine date range based on timeframe
+        let dateFilter = '';
+        let previousDateFilter = '';
+        const now = new Date();
+        
+        if (timeframe === 'month') {
+            dateFilter = `AND o.created_at >= DATE_TRUNC('month', NOW())`;
+            previousDateFilter = `AND o.created_at >= DATE_TRUNC('month', NOW() - INTERVAL '1 month') AND o.created_at < DATE_TRUNC('month', NOW())`;
+        } else if (timeframe === '6months') {
+            dateFilter = `AND o.created_at >= NOW() - INTERVAL '6 months'`;
+            previousDateFilter = `AND o.created_at >= NOW() - INTERVAL '12 months' AND o.created_at < NOW() - INTERVAL '6 months'`;
+        } else if (timeframe === 'year') {
+            dateFilter = `AND o.created_at >= DATE_TRUNC('year', NOW())`;
+            previousDateFilter = `AND o.created_at >= DATE_TRUNC('year', NOW() - INTERVAL '1 year') AND o.created_at < DATE_TRUNC('year', NOW())`;
+        }
+
+        // 1. Total Tonnage/Quantity Sold (current period)
+        const tonnageQuery = `
+            SELECT COALESCE(SUM(oi.quantity), 0) AS total_quantity
+            FROM order_items oi
+            JOIN orders o ON oi.order_id = o.id
+            WHERE oi.vendor_id = $1 ${dateFilter}
+        `;
+        const tonnageResult = await pool.query(tonnageQuery, [vendorId]);
+        const totalQuantity = parseInt(tonnageResult.rows[0].total_quantity) || 0;
+
+        // Previous period tonnage for growth calculation
+        const prevTonnageQuery = `
+            SELECT COALESCE(SUM(oi.quantity), 0) AS total_quantity
+            FROM order_items oi
+            JOIN orders o ON oi.order_id = o.id
+            WHERE oi.vendor_id = $1 ${previousDateFilter}
+        `;
+        const prevTonnageResult = await pool.query(prevTonnageQuery, [vendorId]);
+        const prevTotalQuantity = parseInt(prevTonnageResult.rows[0].total_quantity) || 0;
+        const tonnageGrowth = prevTotalQuantity > 0 ? ((totalQuantity - prevTotalQuantity) / prevTotalQuantity * 100) : 0;
+
+        // 2. Average Order Value (current period)
+        const aovQuery = `
+            SELECT COALESCE(AVG(o.total_amount), 0) AS avg_order_value,
+                   COUNT(o.id) AS order_count,
+                   COALESCE(SUM(o.total_amount), 0) AS total_revenue
+            FROM orders o
+            WHERE o.vendor_id = $1 ${dateFilter}
+        `;
+        const aovResult = await pool.query(aovQuery, [vendorId]);
+        const avgOrderValue = parseFloat(aovResult.rows[0].avg_order_value) || 0;
+        const currentRevenue = parseFloat(aovResult.rows[0].total_revenue) || 0;
+
+        // Previous period AOV for growth
+        const prevAovQuery = `
+            SELECT COALESCE(AVG(o.total_amount), 0) AS avg_order_value,
+                   COALESCE(SUM(o.total_amount), 0) AS total_revenue
+            FROM orders o
+            WHERE o.vendor_id = $1 ${previousDateFilter}
+        `;
+        const prevAovResult = await pool.query(prevAovQuery, [vendorId]);
+        const prevAvgOrderValue = parseFloat(prevAovResult.rows[0].avg_order_value) || 0;
+        const prevRevenue = parseFloat(prevAovResult.rows[0].total_revenue) || 0;
+        const aovGrowth = prevAvgOrderValue > 0 ? ((avgOrderValue - prevAvgOrderValue) / prevAvgOrderValue * 100) : 0;
+
+        // 3. Category/Segment Distribution (by product category)
+        const categoryQuery = `
+            SELECT 
+                p.category,
+                COALESCE(SUM(oi.quantity), 0) AS total_quantity,
+                COALESCE(SUM(oi.quantity * oi.price), 0) AS total_revenue
+            FROM order_items oi
+            JOIN orders o ON oi.order_id = o.id
+            JOIN products p ON oi.product_id = p.id
+            WHERE oi.vendor_id = $1 ${dateFilter}
+            GROUP BY p.category
+            ORDER BY total_quantity DESC
+        `;
+        const categoryResult = await pool.query(categoryQuery, [vendorId]);
+
+        // Find top segment
+        const topSegment = categoryResult.rows.length > 0 ? categoryResult.rows[0] : null;
+        const totalCategoryQuantity = categoryResult.rows.reduce((sum, cat) => sum + parseInt(cat.total_quantity), 0);
+
+        // 4. Monthly Revenue Chart Data
+        let monthlyQuery = '';
+        if (timeframe === 'month') {
+            // Daily data for current month
+            monthlyQuery = `
+                SELECT 
+                    EXTRACT(DAY FROM o.created_at)::integer AS day_num,
+                    COALESCE(SUM(o.total_amount), 0) AS revenue
+                FROM orders o
+                WHERE o.vendor_id = $1 ${dateFilter}
+                GROUP BY EXTRACT(DAY FROM o.created_at)
+                ORDER BY day_num ASC
+            `;
+        } else {
+            // Monthly data
+            monthlyQuery = `
+                SELECT 
+                    TO_CHAR(o.created_at, 'Mon') AS month_name,
+                    EXTRACT(MONTH FROM o.created_at)::integer AS month_num,
+                    COALESCE(SUM(o.total_amount), 0) AS revenue
+                FROM orders o
+                WHERE o.vendor_id = $1 ${dateFilter}
+                GROUP BY TO_CHAR(o.created_at, 'Mon'), EXTRACT(MONTH FROM o.created_at)
+                ORDER BY month_num ASC
+            `;
+        }
+        const monthlyResult = await pool.query(monthlyQuery, [vendorId]);
+
+        // Build chart data
+        let chartLabels: string[] = [];
+        let chartData: number[] = [];
+
+        if (timeframe === 'month') {
+            // Fill all days of current month
+            const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+            const revenueMap = new Map<number, number>();
+            for (const row of monthlyResult.rows) {
+                revenueMap.set(row.day_num, parseFloat(row.revenue));
+            }
+            for (let i = 1; i <= daysInMonth; i++) {
+                chartLabels.push(`${i}`);
+                chartData.push(revenueMap.get(i) || 0);
+            }
+        } else {
+            // Fill months based on timeframe
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const revenueMap = new Map<string, number>();
+            for (const row of monthlyResult.rows) {
+                revenueMap.set(row.month_name, parseFloat(row.revenue));
+            }
+            
+            let startMonth = 0;
+            let monthsToShow = 12;
+            
+            if (timeframe === '6months') {
+                startMonth = now.getMonth() - 5;
+                monthsToShow = 6;
+                if (startMonth < 0) startMonth += 12;
+            } else if (timeframe === 'year') {
+                startMonth = 0;
+                monthsToShow = 12;
+            }
+
+            for (let i = 0; i < monthsToShow; i++) {
+                const monthIndex = (startMonth + i) % 12;
+                chartLabels.push(monthNames[monthIndex]);
+                chartData.push(revenueMap.get(monthNames[monthIndex]) || 0);
+            }
+        }
+
+        // 5. Top Selling Products with growth calculation
+        const topProductsQuery = `
+            SELECT 
+                p.id AS product_id,
+                p.name AS product_name,
+                p.category,
+                COALESCE(SUM(oi.quantity), 0) AS total_sales,
+                COALESCE(SUM(oi.quantity * oi.price), 0) AS total_revenue
+            FROM order_items oi
+            JOIN orders o ON oi.order_id = o.id
+            JOIN products p ON oi.product_id = p.id
+            WHERE oi.vendor_id = $1 ${dateFilter}
+            GROUP BY p.id, p.name, p.category
+            ORDER BY total_sales DESC
+            LIMIT 5
+        `;
+        const topProductsResult = await pool.query(topProductsQuery, [vendorId]);
+
+        // Calculate growth for each product
+        const topProducts = await Promise.all(topProductsResult.rows.map(async (row: any) => {
+            // Get previous period sales for this product
+            const prevProductQuery = `
+                SELECT COALESCE(SUM(oi.quantity), 0) AS prev_sales
+                FROM order_items oi
+                JOIN orders o ON oi.order_id = o.id
+                WHERE oi.vendor_id = $1 AND oi.product_id = $2 ${previousDateFilter}
+            `;
+            const prevProductResult = await pool.query(prevProductQuery, [vendorId, row.product_id]);
+            const prevSales = parseInt(prevProductResult.rows[0]?.prev_sales) || 0;
+            const currentSales = parseInt(row.total_sales);
+            const growth = prevSales > 0 ? ((currentSales - prevSales) / prevSales * 100) : 0;
+
+            return {
+                id: row.product_id,
+                name: row.product_name,
+                category: row.category || 'Uncategorized',
+                sales: currentSales,
+                revenue: parseFloat(row.total_revenue) || 0,
+                growth: growth,
+            };
+        }));
+
+        return res.status(200).json({
+            message: "Analytics data fetched successfully",
+            data: {
+                kpi: {
+                    totalQuantity: totalQuantity,
+                    tonnageGrowth: parseFloat(tonnageGrowth.toFixed(1)),
+                    avgOrderValue: avgOrderValue,
+                    aovGrowth: parseFloat(aovGrowth.toFixed(1)),
+                    topSegment: topSegment ? {
+                        name: topSegment.category || 'Unknown',
+                        volume: parseInt(topSegment.total_quantity),
+                        percentage: totalCategoryQuantity > 0 ? parseFloat((parseInt(topSegment.total_quantity) / totalCategoryQuantity * 100).toFixed(1)) : 0,
+                    } : null,
+                    totalRevenue: currentRevenue,
+                    revenueGrowth: prevRevenue > 0 ? parseFloat(((currentRevenue - prevRevenue) / prevRevenue * 100).toFixed(1)) : 0,
+                },
+                revenueChart: {
+                    labels: chartLabels,
+                    data: chartData,
+                },
+                categoryDistribution: categoryResult.rows.map((row: any) => ({
+                    name: row.category || 'Uncategorized',
+                    quantity: parseInt(row.total_quantity) || 0,
+                    revenue: parseFloat(row.total_revenue) || 0,
+                    percentage: totalCategoryQuantity > 0 ? parseFloat((parseInt(row.total_quantity) / totalCategoryQuantity * 100).toFixed(1)) : 0,
+                })),
+                topProducts: topProducts,
+            }
+        });
+    } catch (e) {
+        console.error("Error fetching vendor analytics:", e);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+};

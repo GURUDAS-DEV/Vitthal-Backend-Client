@@ -3,11 +3,13 @@ import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import pool from './DbConnect';
-import AuthRouter from './Routers/Auth.router';
 import productRouter from './Routers/Product.router';
-import VendorsRouter from './Routers/Vendors.Router';
 import clientRouter from './Routers/ClientRouter';
-import CartRouter from './Routers/Cart.router';
+import checkoutRouter from './Routers/Checkout.Router';
+import authRouter from './Routers/Auth.router';
+import vendorsRouter from './Routers/Vendors.Router';
+import cartRouter from './Routers/Cart.router';
+import orderRouter from './Routers/Order.router';
 
 dotenv.config();
 
@@ -17,7 +19,7 @@ const PORT = 9000;
 
 
 //cors configuration
-const allowedOrigins = ['https://vitthal-frontend.vercel.app', 'http://localhost:5173', 'http://localhost:3000', 'http://localhost:4000'];
+const allowedOrigins = ['http://localhost:3000', 'http://localhost:4000', "http://192.168.29.150:4000","http://192.168.29.150:4000"];
 
 app.use("/", cors({
     origin: allowedOrigins,
@@ -35,11 +37,13 @@ pool.connect()
     .catch((err) => console.error('Database connection error:', err.stack));
 
 // Define routes
-app.use("/api/auth", AuthRouter);
+app.use("/api/auth", authRouter);
 app.use("/api/products", productRouter);
-app.use("/api/vendors", VendorsRouter);
+app.use("/api/vendors", vendorsRouter);
 app.use("/api/client", clientRouter);
-app.use("/api/cart", CartRouter);
+app.use("/api/cart", cartRouter);
+app.use("/api/checkout", checkoutRouter);
+app.use("/api/orders", orderRouter);
 
 // Start the server
 app.listen(PORT, () => {

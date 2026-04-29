@@ -3,7 +3,7 @@ import pool from "../DbConnect";
 
 
 export const addClientDetailsController = async (req: Request, res: Response): Promise<Response> => {
-    const { address, city, state, country, pincode, latitude, longitude} = req.body;
+    const { phone, address, city, state, country, pincode, latitude, longitude} = req.body;
     const authUser = (req as any).user;
 
     if (!authUser?.userId || !authUser?.role) {
@@ -12,7 +12,7 @@ export const addClientDetailsController = async (req: Request, res: Response): P
 
     const { userId, role } = authUser;
 
-    if (!userId || !address || !city || !state || !country || !pincode || latitude === undefined || longitude === undefined) {
+    if (!userId || !phone || !address || !city || !state || !country || !pincode || latitude === undefined || longitude === undefined) {
         return res.status(400).json({ message: "All fields are required!" });
     }
 
@@ -50,6 +50,18 @@ export const addClientDetailsController = async (req: Request, res: Response): P
                 [userId, address, city, state, country, pincode, latitude, longitude]
             );
             newAddress = addressResult.rows[0];
+        }
+
+        if (!client_id) {
+            await pool.query(
+                `INSERT INTO client (user_id, phone) VALUES ($1, $2)`,
+                [userId, phone]
+            );
+        } else {
+            await pool.query(
+                `UPDATE client SET phone = $1, updated_at = NOW() WHERE user_id = $2`,
+                [phone, userId]
+            );
         }
 
         await pool.query('COMMIT');
@@ -211,5 +223,75 @@ export const clientDetails = async (req: Request, res: Response): Promise<Respon
     catch (e) {
         console.error("Error : ", e);
         return res.status(500).json({ message: 'internal server error' });
+    }
+}
+
+export const upsertClientAddressController = async (req: Request, res: Response): Promise<Response> => {
+    const { address, city, state, country, pincode, latitude, longitude } = req.body;
+    const authUser = (req as any).user;
+
+    if (!authUser?.userId || !authUser?.role) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { userId, role } = authUser;
+
+    if (!userId || !address || !city || !state || !country || !pincode || latitude === undefined || longitude === undefined) {
+        return res.status(400).json({ message: "All address fields are required!" });
+    }
+
+    if (role != 'client')
+        return res.status(403).json({ message: "Unauthorized! Only clients can add/update addresses!" });
+
+    try {
+        const existingAddress = await pool.query(
+            `SELECT id FROM addresses WHERE user_id = $1`,
+            [userId]
+        );
+
+        let result;
+        if (existingAddress.rows.length > 0) {
+            result = await pool.query(
+                `UPDATE addresses
+                 SET address = $1, city = $2, state = $3, country = $4, pincode = $5, latitude = $6, longitude = $7, updated_at = NOW()
+                 WHERE user_id = $8 RETURNING *`,
+                [address, city, state, country, pincode, latitude, longitude, userId]
+            );
+        } else {
+            result = await pool.query(
+                `INSERT INTO addresses (user_id, address, city, state, country, pincode, latitude, longitude)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                [userId, address, city, state, country, pincode, latitude, longitude]
+            );
+        }
+
+        return res.status(200).json({
+            message: existingAddress.rows.length > 0 ? "Address updated successfully!" : "Address added successfully!",
+            address: result.rows[0]
+        });
+    }
+    catch (e) {
+        console.error("Error occurred while upserting client address: ", e);
+        return res.status(500).json({ message: "Error occurred while saving address!" });
+    }
+}
+
+export const checkClientSetupStatus = async (req: Request, res: Response): Promise<Response> => {
+    const authUser = (req as any).user;
+    if (!authUser?.userId) return res.status(401).json({ message: "Unauthorized" });
+
+    try {
+        const query = `
+            SELECT c.id as client_id, a.id as address_id 
+            FROM users u
+            LEFT JOIN client c ON u.id = c.user_id
+            LEFT JOIN addresses a ON u.id = a.user_id
+            WHERE u.id = $1
+        `;
+        const result = await pool.query(query, [authUser.userId]);
+        const isSetupComplete = result.rows.length > 0 && result.rows[0].client_id != null && result.rows[0].address_id != null;
+        return res.status(200).json({ isSetupComplete });
+    } catch (e) {
+        return res.status(500).json({ message: "Error" });
     }
 }
