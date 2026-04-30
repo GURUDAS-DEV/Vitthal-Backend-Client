@@ -30,6 +30,13 @@ BEGIN
     END IF;
 END$$;
 
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vendor_product_status') THEN
+        CREATE TYPE vendor_product_status AS ENUM ('active', 'inactive', 'out_of_stock', 'discontinued', 'waiting');
+    END IF;
+END$$;
+
 -- ================================
 -- AUTHENTICATION LAYER
 -- ================================
@@ -120,6 +127,7 @@ CREATE TABLE IF NOT EXISTS vendor_products (
     stock_quantity INTEGER NOT NULL DEFAULT 0 CHECK (stock_quantity >= 0),
     commision_percentage INTEGER DEFAULT 0 CHECK (commision_percentage >= 0 AND commision_percentage <= 100),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    status vendor_product_status NOT NULL DEFAULT 'active',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -328,6 +336,7 @@ CREATE INDEX IF NOT EXISTS idx_fulfillment_centers_user_id ON fulfillment_center
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_vendors_rating ON vendors(rating DESC) WHERE is_active = TRUE;
 CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type);
+CREATE INDEX IF NOT EXISTS idx_vendor_products_status ON vendor_products(status);
 
 --cart indexes
 CREATE INDEX IF NOT EXISTS idx_cart_items_cart_id ON cart_items(cart_id);
