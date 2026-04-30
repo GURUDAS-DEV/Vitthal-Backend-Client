@@ -273,3 +273,177 @@ export const checkVendorSetupStatus = async (req: Request, res: Response): Promi
         return res.status(500).json({ message: 'internal server error' });
     }
 }
+
+export const getVendorProductByIdController = async (req: Request, res: Response): Promise<Response> => {
+    const { productId } = req.params;
+    const { userId, role } = (req as any).user;
+
+    if (!userId) {
+        return res.status(400).json({ message: "User ID is required!" });
+    }
+
+    if (role !== 'vendor') {
+        return res.status(403).json({ message: "Unauthorized! Only vendors can access their products!" });
+    }
+
+    if (!productId) {
+        return res.status(400).json({ message: "Product ID is required!" });
+    }
+
+    try {
+        const vendorResult = await pool.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
+
+        if (vendorResult.rows.length === 0) {
+            return res.status(404).json({ message: "Vendor not found!" });
+        }
+
+        const vendorId = vendorResult.rows[0].id;
+
+        const query = `
+            SELECT 
+                p.id AS product_id,
+                p.name AS product_name,
+                p.description,
+                p.category,
+                p.product_type,
+                p.specifications,
+                vp.id AS vendor_product_id,
+                vp.price,
+                vp.moq,
+                vp.stock_quantity,
+                vp.is_active,
+                vp.created_at,
+                vp.updated_at,
+                COALESCE(
+                    JSON_AGG(
+                        JSONB_BUILD_OBJECT(
+                            'image_url', pImg.image_url,
+                            'is_primary', pImg.is_primary,
+                            'display_order', pImg.display_order
+                        )
+                        ORDER BY pImg.display_order
+                    ) FILTER (WHERE pImg.id IS NOT NULL),
+                    '[]'
+                ) AS images
+            FROM vendor_products vp
+            JOIN products p ON vp.product_id = p.id
+            LEFT JOIN products_images pImg ON p.id = pImg.product_id
+            WHERE vp.vendor_id = $1 AND p.id = $2
+            GROUP BY p.id, vp.id, vp.price, vp.moq, vp.stock_quantity, vp.is_active, vp.created_at, vp.updated_at
+        `;
+
+        const result = await pool.query(query, [vendorId, productId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Product not found or you don't have access to it!" });
+        }
+
+        return res.status(200).json({
+            message: "Vendor product fetched successfully",
+            data: result.rows[0]
+        });
+    } catch (error) {
+        console.error("Error fetching vendor product:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+export const updateVendorProductController = async (req: Request, res: Response): Promise<Response> => {
+    const { productId, price, moq, stockQuantity, isActive } = req.body;
+    const { userId, role } = (req as any).user;
+
+    if (!userId) {
+        return res.status(400).json({ message: "User ID is required!" });
+    }
+
+    if (role !== 'vendor') {
+        return res.status(403).json({ message: "Unauthorized! Only vendors can update their products!" });
+    }
+
+    if (!productId) {
+        return res.status(400).json({ message: "Product ID is required!" });
+    }
+
+    if (price === undefined || moq === undefined || stockQuantity === undefined) {
+        return res.status(400).json({ message: "Price, MOQ, and Stock Quantity are required!" });
+    }
+
+    try {
+        const vendorResult = await pool.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
+
+        if (vendorResult.rows.length === 0) {
+            return res.status(404).json({ message: "Vendor not found!" });
+        }
+
+        const vendorId = vendorResult.rows[0].id;
+
+        const updateQuery = `
+            UPDATE vendor_products 
+            SET price = $1, moq = $2, stock_quantity = $3, is_active = $4, updated_at = NOW()
+            WHERE vendor_id = $5 AND product_id = $6
+            RETURNING *
+        `;
+
+        const result = await pool.query(updateQuery, [
+            Number(price),
+            Number(moq),
+            Number(stockQuantity),
+            isActive !== undefined ? isActive : true,
+            vendorId,
+            productId
+        ]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Product not found or you don't have permission to update it!" });
+        }
+
+        return res.status(200).json({
+            message: "Product updated successfully",
+            data: result.rows[0]
+        });
+    } catch (error) {
+        console.error("Error updating vendor product:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+export const deleteVendorProductController = async (req: Request, res: Response): Promise<Response> => {
+    const { productId } = req.params;
+    const { userId, role } = (req as any).user;
+
+    if (!userId) {
+        return res.status(400).json({ message: "User ID is required!" });
+    }
+
+    if (role !== 'vendor') {
+        return res.status(403).json({ message: "Unauthorized! Only vendors can delete their products!" });
+    }
+
+    if (!productId) {
+        return res.status(400).json({ message: "Product ID is required!" });
+    }
+
+    try {
+        const vendorResult = await pool.query('SELECT id FROM vendors WHERE user_id = $1', [userId]);
+
+        if (vendorResult.rows.length === 0) {
+            return res.status(404).json({ message: "Vendor not found!" });
+        }
+
+        const vendorId = vendorResult.rows[0].id;
+
+        const deleteQuery = `DELETE FROM vendor_products WHERE vendor_id = $1 AND product_id = $2 RETURNING *`;
+        const result = await pool.query(deleteQuery, [vendorId, productId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: "Product not found or you don't have permission to delete it!" });
+        }
+
+        return res.status(200).json({
+            message: "Product removed from your catalog successfully"
+        });
+    } catch (error) {
+        console.error("Error deleting vendor product:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
