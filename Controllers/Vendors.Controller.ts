@@ -1,10 +1,22 @@
 import type { Request, Response } from "express";
 import pool from "../DbConnect";
 
+function normalizeRequiredText(value: unknown) {
+    return typeof value === "string" ? value.trim() : "";
+}
+
+function isMissingCoordinate(value: unknown) {
+    return value === null || value === undefined || value === "";
+}
+
 export const addVendorController = async (req: Request, res: Response): Promise<Response> => {
     const { companyName, phone, gstNumber } = req.body;
     const { userId } = (req as any).user;
-    if (!userId || !companyName || !phone || !gstNumber) {
+    const normalizedCompanyName = normalizeRequiredText(companyName);
+    const normalizedPhone = normalizeRequiredText(phone);
+    const normalizedGstNumber = normalizeRequiredText(gstNumber);
+
+    if (!userId || !normalizedCompanyName || !normalizedPhone || !normalizedGstNumber) {
         return res.status(400).json({ message: "All fields are required!" });
     }
 
@@ -13,15 +25,46 @@ export const addVendorController = async (req: Request, res: Response): Promise<
         return res.status(403).json({ message: "Unauthorized! Only vendors can add vendors!" });
 
     try {
+        await pool.query(
+            `UPDATE users SET role = 'vendor', updated_at = NOW() WHERE id = $1`,
+            [userId]
+        );
+
+        const duplicateGst = await pool.query(
+            `
+                SELECT user_id
+                FROM vendors
+                WHERE gst_number = $1 AND user_id <> $2
+            `,
+            [normalizedGstNumber, userId]
+        );
+
+        if (duplicateGst.rows.length > 0) {
+            return res.status(409).json({ message: "This GST number is already registered with another vendor." });
+        }
+
         const result = await pool.query(
-            'INSERT INTO vendors (user_id, phone, gst_number, company_name) VALUES ($1, $2, $3, $4) RETURNING id, phone,     gst_number',
-            [userId, phone, gstNumber, companyName]
+            `
+                INSERT INTO vendors (user_id, phone, gst_number, company_name, approval_status, approval_notes)
+                VALUES ($1, $2, $3, $4, 'pending', 'Awaiting admin approval')
+                ON CONFLICT (user_id)
+                DO UPDATE SET
+                    phone = EXCLUDED.phone,
+                    gst_number = EXCLUDED.gst_number,
+                    company_name = EXCLUDED.company_name,
+                    updated_at = NOW()
+                RETURNING id, phone, gst_number, approval_status, approval_notes
+            `,
+            [userId, normalizedPhone, normalizedGstNumber, normalizedCompanyName]
         );
         const vendor = result.rows[0];
-        return res.status(201).json({ message: "Vendor added successfully!", vendor });
+        return res.status(201).json({ message: "Vendor profile saved successfully!", vendor });
     }
     catch (e) {
         console.error("Error occurred while adding vendor: ", e);
+        if ((e as { code?: string }).code === "23505") {
+            return res.status(409).json({ message: "Vendor profile already exists or GST number is already in use." });
+        }
         return res.status(500).json({ message: "Error occurred while adding vendor!" });
     }
 }
@@ -29,7 +72,11 @@ export const addVendorController = async (req: Request, res: Response): Promise<
 export const updateVendorBasicDetailsController = async (req: Request, res: Response): Promise<Response> => {
     const { companyName, phone, gstNumber } = req.body;
     const { userId } = (req as any).user;
-    if (!userId || !companyName || !phone || !gstNumber) {
+    const normalizedCompanyName = normalizeRequiredText(companyName);
+    const normalizedPhone = normalizeRequiredText(phone);
+    const normalizedGstNumber = normalizeRequiredText(gstNumber);
+
+    if (!userId || !normalizedCompanyName || !normalizedPhone || !normalizedGstNumber) {
         return res.status(400).json({ message: "All fields are required!" });
     }
 
@@ -39,6 +86,11 @@ export const updateVendorBasicDetailsController = async (req: Request, res: Resp
 
 
     try {
+        await pool.query(
+            `UPDATE users SET role = 'vendor', updated_at = NOW() WHERE id = $1`,
+            [userId]
+        );
+
         const doesVendorExists = await pool.query(
             `SELECT * FROM vendors WHERE user_id = $1`,
             [userId]
@@ -52,9 +104,22 @@ export const updateVendorBasicDetailsController = async (req: Request, res: Resp
             return res.status(400).json({ message: "Vendor is blocked! You cannot update it" });
         }
 
+        const duplicateGst = await pool.query(
+            `
+                SELECT user_id
+                FROM vendors
+                WHERE gst_number = $1 AND user_id <> $2
+            `,
+            [normalizedGstNumber, userId]
+        );
+
+        if (duplicateGst.rows.length > 0) {
+            return res.status(409).json({ message: "This GST number is already registered with another vendor." });
+        }
+
         const result = await pool.query(
             `UPDATE vendors SET phone = $1, gst_number = $2, company_name = $3 WHERE user_id = $4 RETURNING id, phone, gst_number, company_name`,
-            [phone, gstNumber, companyName, userId]
+            [normalizedPhone, normalizedGstNumber, normalizedCompanyName, userId]
         );
         const vendor = result.rows[0];
 
@@ -62,6 +127,9 @@ export const updateVendorBasicDetailsController = async (req: Request, res: Resp
     }
     catch (e) {
         console.log("Error occurred while updating vendor: ", e);
+        if ((e as { code?: string }).code === "23505") {
+            return res.status(409).json({ message: "GST number is already in use by another vendor." });
+        }
         return res.status(500).json({ message: "Error occurred while updating vendor!" });
     }
 }
@@ -69,7 +137,22 @@ export const updateVendorBasicDetailsController = async (req: Request, res: Resp
 export const createVendorAddress = async (req: Request, res: Response): Promise<Response> => {
     const { address, city, state, country, pincode, latitude, longitude } = req.body;
     const { userId } = (req as any).user;
-    if (!userId || !address || !city || !state || !country || !pincode || !latitude || !longitude) {
+    const normalizedAddress = normalizeRequiredText(address);
+    const normalizedCity = normalizeRequiredText(city);
+    const normalizedState = normalizeRequiredText(state);
+    const normalizedCountry = normalizeRequiredText(country);
+    const normalizedPincode = normalizeRequiredText(pincode);
+
+    if (
+        !userId ||
+        !normalizedAddress ||
+        !normalizedCity ||
+        !normalizedState ||
+        !normalizedCountry ||
+        !normalizedPincode ||
+        isMissingCoordinate(latitude) ||
+        isMissingCoordinate(longitude)
+    ) {
         return res.status(400).json({ message: "All fields are required!" });
     }
 
@@ -111,7 +194,7 @@ export const createVendorAddress = async (req: Request, res: Response): Promise<
 
         const result = await pool.query(
             `INSERT INTO addresses (user_id, address, city, state, country, pincode, latitude, longitude) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, user_id, address, city, state, country, pincode, latitude, longitude`,
-            [userId, address, city, state, country, pincode, latitude, longitude]
+            [userId, normalizedAddress, normalizedCity, normalizedState, normalizedCountry, normalizedPincode, latitude, longitude]
         );
         const vendorAddress = result.rows[0];
 
@@ -119,6 +202,9 @@ export const createVendorAddress = async (req: Request, res: Response): Promise<
     }
     catch (e) {
         console.log("Error occurred while adding vendor address: ", e);
+        if ((e as { code?: string }).code === "23505") {
+            return res.status(409).json({ message: "Address already exists for this vendor. Please update it instead." });
+        }
         return res.status(500).json({ message: "Error occurred while adding vendor address!" });
     }
 }
@@ -126,7 +212,22 @@ export const createVendorAddress = async (req: Request, res: Response): Promise<
 export const updateVendorAddress = async (req: Request, res: Response): Promise<Response> => {
     const { address, city, state, country, pincode, latitude, longitude } = req.body;
     const { userId } = (req as any).user;
-    if (!userId || !address || !city || !state || !country || !pincode || !latitude || !longitude) {
+    const normalizedAddress = normalizeRequiredText(address);
+    const normalizedCity = normalizeRequiredText(city);
+    const normalizedState = normalizeRequiredText(state);
+    const normalizedCountry = normalizeRequiredText(country);
+    const normalizedPincode = normalizeRequiredText(pincode);
+
+    if (
+        !userId ||
+        !normalizedAddress ||
+        !normalizedCity ||
+        !normalizedState ||
+        !normalizedCountry ||
+        !normalizedPincode ||
+        isMissingCoordinate(latitude) ||
+        isMissingCoordinate(longitude)
+    ) {
         return res.status(400).json({ message: "All fields are required!" });
     }
 
@@ -169,7 +270,7 @@ export const updateVendorAddress = async (req: Request, res: Response): Promise<
 
         const result = await pool.query(
             `UPDATE addresses SET address = $1, city = $2, state = $3, country = $4, pincode = $5, latitude = $6, longitude = $7 WHERE user_id = $8 RETURNING id, user_id, address, city, state, country, pincode, latitude, longitude`,
-            [address, city, state, country, pincode, latitude, longitude, userId]
+            [normalizedAddress, normalizedCity, normalizedState, normalizedCountry, normalizedPincode, latitude, longitude, userId]
         );
         const vendorAddress = result.rows[0];
 
@@ -201,6 +302,9 @@ export const getVendorDetailsController = async (req: Request, res: Response): P
                 v.phone as vendor_phone,
                 v.company_name as vendor_company_name,
                 v.gst_number as vendor_gst_number,
+                v.approval_status as vendor_approval_status,
+                v.approval_notes as vendor_approval_notes,
+                v.is_blocked as vendor_is_blocked,
                 a.address as vendor_address,
                 a.city as vendor_city,
                 a.state as vendor_state,
@@ -245,6 +349,7 @@ export const checkVendorSetupStatus = async (req: Request, res: Response): Promi
         const query = `
             SELECT 
                 v.id as vendor_exists,
+                v.approval_status,
                 a.id as address_exists
             FROM users u
             LEFT JOIN vendors v ON u.id = v.user_id
@@ -265,7 +370,8 @@ export const checkVendorSetupStatus = async (req: Request, res: Response): Promi
             message: "Setup status fetched successfully",
             isSetupComplete,
             hasVendorProfile: row.vendor_exists !== null,
-            hasAddress: row.address_exists !== null
+            hasAddress: row.address_exists !== null,
+            approvalStatus: row.approval_status || null
         });
     }
     catch (e) {

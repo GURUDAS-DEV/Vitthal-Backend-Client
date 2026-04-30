@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS vendors (
     rating NUMERIC(2,1) NOT NULL DEFAULT 0 CHECK (rating >= 0 AND rating <= 5),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     is_blocked BOOLEAN NOT NULL DEFAULT FALSE,
+    approval_status TEXT NOT NULL DEFAULT 'pending',
+    approval_notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -82,6 +84,10 @@ CREATE TABLE IF NOT EXISTS products (
     category TEXT,
     product_type TEXT,
     specifications JSONB NOT NULL DEFAULT '{}'::jsonb,
+    approval_status TEXT NOT NULL DEFAULT 'approved',
+    approval_notes TEXT,
+    created_by_user_id UUID,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_products_product_type
@@ -255,6 +261,13 @@ CREATE TABLE orders (
     -- pending, paid, failed
 
     total_amount NUMERIC(12,2) NOT NULL,
+    source TEXT NOT NULL DEFAULT 'client',
+    order_reference TEXT,
+    order_notes TEXT,
+    customer_name TEXT,
+    customer_email TEXT,
+    customer_phone TEXT,
+    created_by_admin_id TEXT,
 
     -- 🔥 for storing address(not storing address refrence but storing address directly, because if refrence is stored them deletion of address by user become impossible)
     address_line TEXT NOT NULL,
