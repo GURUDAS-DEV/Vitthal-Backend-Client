@@ -28,6 +28,8 @@ const allowedOrigins = new Set([
     'http://192.168.29.150:4000',
     'http://192.168.1.11:3000',
     'http://192.168.1.11:3001',
+    'https://vitthal-vendor-frontend.vercel.app',
+    'https://vitthal-vendor-frontend.vercel.app'
 ]);
 
 app.use("/", cors({
