@@ -5,9 +5,12 @@ import { generateAccessToken, generateRefreshToken, verifyToken } from "../helpe
 import pool from "../DbConnect";
 import { COOKIE_OPTIONS } from "../shared/CokkieSetting.shared";
 
+const validUserRoles = new Set(["client", "vendor", "admin", "super_admin"]);
+
 export async function registerUser(req: Request, res: Response): Promise<Response> {
 
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role: requestedRole } = req.body;
+    const role = typeof requestedRole === "string" && requestedRole.trim() ? requestedRole.trim() : "client";
 
     if (!name || !email || !password) {
         return res.status(400).json({ message: 'All fields are required' });
@@ -19,6 +22,10 @@ export async function registerUser(req: Request, res: Response): Promise<Respons
 
     if (!/^[\w.-]+@[\w.-]+\.\w{2,}$/.test(email)) {
         return res.status(400).json({ message: 'Invalid email format' });
+    }
+
+    if (!validUserRoles.has(role)) {
+        return res.status(400).json({ message: 'Invalid role' });
     }
 
     try {
@@ -97,10 +104,10 @@ export async function registerUser(req: Request, res: Response): Promise<Respons
 
 
 export async function loginUser(req: Request, res: Response): Promise<Response> {
-    const { email, password, role } = req.body;
+    const { email, password } = req.body;
 
     if (!email || !password ) {
-        return res.status(400).json({ message: 'Email and password and role are required' });
+        return res.status(400).json({ message: 'Email and password are required' });
     }
 
     try {

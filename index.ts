@@ -3,6 +3,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import pool from './DbConnect';
+import { ensureMarketplaceSchema } from './DbSetup';
 import productRouter from './Routers/Product.router';
 import clientRouter from './Routers/ClientRouter';
 import checkoutRouter from './Routers/Checkout.Router';
@@ -19,10 +20,33 @@ const PORT = 9000;
 
 
 //cors configuration
-const allowedOrigins = ['http://localhost:3000', 'http://localhost:4000', "http://192.168.29.150:4000","https://vitthal-frontend.vercel.app", "https://vitthal-vendor-frontend.vercel.app"];
+const allowedOrigins = new Set([
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:4000',
+    'http://localhost:4001',
+    'http://192.168.29.150:4000',
+    'http://192.168.1.11:3000',
+    'http://192.168.1.11:3001',
+]);
 
 app.use("/", cors({
-    origin: allowedOrigins,
+    origin(origin, callback) {
+        if (!origin) {
+            callback(null, true);
+            return;
+        }
+
+        const isLocalhost = /^http:\/\/localhost:\d+$/.test(origin);
+        const isLanIp = /^http:\/\/192\.168\.\d+\.\d+:\d+$/.test(origin);
+
+        if (allowedOrigins.has(origin) || isLocalhost || isLanIp) {
+            callback(null, true);
+            return;
+        }
+
+        callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    },
     credentials: true,
 }));
 
@@ -35,6 +59,10 @@ app.use(express.urlencoded({ extended: true }));
 pool.connect()
     .then(() => console.log('Connected to the database successfully!'))
     .catch((err) => console.error('Database connection error:', err.stack));
+
+void ensureMarketplaceSchema().catch((error) => {
+    console.error("Failed to ensure marketplace schema:", error);
+});
 
 // Define routes
 app.use("/api/auth", authRouter);

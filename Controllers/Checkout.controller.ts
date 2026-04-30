@@ -58,6 +58,17 @@ export const placeOrderController = async (req: Request, res: Response): Promise
         }
 
         // 4. Create order for each vendor
+        const userProfileQuery = await pool.query(
+            `
+                SELECT u.name, u.email, c.phone
+                FROM users u
+                LEFT JOIN client c ON c.user_id = u.id
+                WHERE u.id = $1
+            `,
+            [userId]
+        );
+        const userProfile = userProfileQuery.rows[0];
+
         for (const vendorId in itemsByVendor) {
             const vendorItems = itemsByVendor[vendorId];
             let totalAmount = 0;
@@ -68,13 +79,17 @@ export const placeOrderController = async (req: Request, res: Response): Promise
             // Insert into orders table
             const orderResult = await pool.query(
                 `INSERT INTO orders (
-                    user_id, vendor_id, cart_id, status, payment_status, total_amount, 
-                    address_line, city, state, country, pincode, latitude, langitude
-                ) VALUES ($1, $2, $3, 'pending', 'pending', $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+                    user_id, vendor_id, cart_id, status, payment_status, total_amount,
+                    address_line, city, state, country, pincode, latitude, langitude,
+                    source, customer_name, customer_email, customer_phone
+                ) VALUES ($1, $2, $3, 'pending', 'pending', $4, $5, $6, $7, $8, $9, $10, $11, 'client', $12, $13, $14) RETURNING id`,
                 [
                     userId, vendorId, cartId, totalAmount,
                     address.address, address.city, address.state, address.country,
-                    address.pincode, address.latitude, address.longitude || address.latitude // fallback just in case
+                    address.pincode, address.latitude, address.longitude || address.latitude,
+                    userProfile?.name || null,
+                    userProfile?.email || null,
+                    userProfile?.phone || null
                 ]
             );
             const orderId = orderResult.rows[0].id;
