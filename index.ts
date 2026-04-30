@@ -19,7 +19,7 @@ const PORT = 9000;
 
 
 //cors configuration
-const allowedOrigins = ['http://localhost:3000', 'http://localhost:4000', "http://192.168.29.150:4000","https://vitthal-frontend.vercel.app"];
+const allowedOrigins = ['http://localhost:3000', 'http://localhost:4000', "http://192.168.29.150:4000","https://vitthal-frontend.vercel.app", "https://vitthal-vendor-frontend.vercel.app"];
 
 app.use("/", cors({
     origin: allowedOrigins,
